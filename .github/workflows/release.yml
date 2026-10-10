@@ -7,7 +7,8 @@ name: Release
 # The release files are also Agent Center's APT repository: the package points APT at
 # https://github.com/<repo>/releases/latest/download/ (data/agent-center.sources), so the
 # index (Packages, InRelease) is signed with the APT_SIGNING_KEY secret, whose public key is
-# data/agent-center-archive-keyring.gpg. The release is published once every file is uploaded.
+# data/agent-center-archive-keyring.gpg (also attached to each release). The release is
+# published once every file is uploaded.
 on:
   push:
     branches: [main]
@@ -53,11 +54,7 @@ jobs:
             apt-utils gpg gpg-agent
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build the Debian package
-        run: |
-          cargo install cargo-deb --locked
-          cargo deb
-      - name: Sign the APT repository
+      - name: Import the APT signing key
         env:
           APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
         run: |
@@ -65,15 +62,33 @@ jobs:
             echo "::error::The APT_SIGNING_KEY secret is missing (see \"APT repository\" in README.md)."
             exit 1
           fi
-          export GNUPGHOME="$(mktemp -d)"
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
-          # The secret must be the key the package tells APT to trust.
-          want=$(gpg --batch --with-colons --show-keys data/agent-center-archive-keyring.gpg | awk -F: '$1 == "fpr" {print $10; exit}')
           have=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" {print $10; exit}')
-          if [ "$want" != "$have" ]; then
-            echo "::error::APT_SIGNING_KEY ($have) is not the key in data/agent-center-archive-keyring.gpg ($want)."
+          if [ -z "$have" ]; then
+            echo "::error::APT_SIGNING_KEY holds no private key."
             exit 1
           fi
+          # The package ships the public key APT trusts. Until the repository has a copy, it comes
+          # from the secret; once it has one, the secret must match it.
+          if [ -f data/agent-center-archive-keyring.gpg ]; then
+            want=$(gpg --batch --with-colons --show-keys data/agent-center-archive-keyring.gpg | awk -F: '$1 == "fpr" {print $10; exit}')
+            if [ "$want" != "$have" ]; then
+              echo "::error::APT_SIGNING_KEY ($have) is not the key in data/agent-center-archive-keyring.gpg ($want)."
+              exit 1
+            fi
+          else
+            gpg --batch --export "$have" > data/agent-center-archive-keyring.gpg
+          fi
+          echo "Signing key: $have"
+      - name: Build the Debian package
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb
+      - name: Sign the APT repository
+        run: |
           # A flat repository whose files sit next to each other in the release ("download/" is the
           # last part of the URL, and the Suites value in agent-center.sources).
           mkdir -p apt/download
@@ -93,6 +108,7 @@ jobs:
           cp apt/download/* dist/
           # The same package under a name that does not change, for the install instructions.
           cp target/debian/*.deb dist/agent-center_amd64.deb
+          cp data/agent-center-archive-keyring.gpg dist/
           tar czf "dist/agent-center-v${VERSION}-x86_64-linux.tar.gz" \
             -C target/release agent-center \
             -C "$GITHUB_WORKSPACE" README.md LICENSE Makefile catalog logos data debian docs/logo.svg
