@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 - 2026-10-10
+
+- New macOS-style app icon.
+
 ## 0.2.0 - 2026-10-10
 
 - Agent Center has its own APT repository, signed and added by the package, so `apt upgrade` installs new versions. Removing the package removes it.
