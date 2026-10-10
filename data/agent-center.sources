@@ -1,0 +1,8 @@
+# Agent Center's APT repository: `apt upgrade` installs new versions of Agent Center.
+# Its files are those of the latest release on GitHub (.../releases/latest/download/).
+# The agent-center package adds this file and deletes it when it is removed.
+# To stop updates from this repository, add the line "Enabled: no" below.
+Types: deb
+URIs: https://github.com/alexandreravelli/agent-center/releases/latest
+Suites: download/
+Signed-By: /usr/share/keyrings/agent-center-archive-keyring.gpg

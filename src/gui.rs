@@ -5,10 +5,11 @@ use crate::runner::{self, Step};
 use crate::versions;
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::prelude::*;
-use gtk::{cairo, glib, pango};
+use gtk::{cairo, gio, glib, pango};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::process::{Child, Command};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
@@ -60,6 +61,7 @@ struct RowWidgets {
     meta: gtk::Label,
     spinner: gtk::Spinner,
     primary: gtk::Button,
+    open: gtk::Button,
     remove: gtk::Button,
 }
 
@@ -102,10 +104,22 @@ struct Ui {
     tx: async_channel::Sender<Msg>,
 }
 
-pub fn run() -> i32 {
-    let app = gtk::Application::builder().application_id(APP_ID).build();
+/// Opens the window, or brings the open one to the front. `--updates` shows the Updates page.
+pub fn run(args: &[String]) -> i32 {
+    let app =
+        gtk::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
     app.connect_activate(build);
-    app.run_with_args::<&str>(&[]);
+    // A second `agent-center` hands its arguments to the running one.
+    app.connect_command_line(|app, cmd| {
+        app.activate();
+        if cmd.arguments().iter().any(|a| a.to_str() == Some("--updates")) {
+            app.activate_action("show-updates", None);
+        }
+        glib::ExitCode::SUCCESS
+    });
+    let mut argv = vec!["agent-center".to_string()];
+    argv.extend(args.iter().cloned());
+    app.run_with_args(&argv);
     0
 }
 
@@ -305,6 +319,15 @@ fn build(app: &gtk::Application) {
     }
     sidebar.select_row(sidebar.row_at_index(0).as_ref());
     {
+        let show_updates = gio::SimpleAction::new("show-updates", None);
+        let (sidebar, window) = (sidebar.clone(), window.clone());
+        show_updates.connect_activate(move |_, _| {
+            sidebar.select_row(sidebar.row_at_index(2).as_ref());
+            window.present();
+        });
+        app.add_action(&show_updates);
+    }
+    {
         let ui = ui.clone();
         search.connect_search_changed(move |_| ui.refilter());
     }
@@ -356,17 +379,24 @@ impl Ui {
 
         let spinner = gtk::Spinner::new();
         let primary = gtk::Button::with_label("Install");
+        let open = gtk::Button::with_label("Open");
+        open.set_tooltip_text(Some(&if app.open.ends_with(".desktop") {
+            format!("Start {}", app.name)
+        } else {
+            format!("Run `{}` in a terminal", app.open)
+        }));
         let remove = gtk::Button::with_label("Remove");
         let info = gtk::Button::with_label("Details");
         info.set_tooltip_text(Some("What Agent Center runs for this app"));
         info.set_relief(gtk::ReliefStyle::None);
-        for w in [&primary, &remove, &info] {
+        for w in [&primary, &open, &remove, &info] {
             w.set_valign(gtk::Align::Center);
         }
         primary.set_size_request(92, -1);
         b.pack_end(&info, false, false, 0);
         b.pack_end(&remove, false, false, 0);
         b.pack_end(&primary, false, false, 0);
+        b.pack_end(&open, false, false, 0);
         b.pack_end(&spinner, false, false, 0);
 
         {
@@ -381,6 +411,10 @@ impl Ui {
         }
         {
             let ui = self.clone();
+            open.connect_clicked(move |_| ui.open(i));
+        }
+        {
+            let ui = self.clone();
             remove.connect_clicked(move |_| ui.confirm_remove(i));
         }
         {
@@ -391,7 +425,7 @@ impl Ui {
         let row = gtk::ListBoxRow::new();
         row.set_activatable(false);
         row.add(&b);
-        RowWidgets { row, meta, spinner, primary, remove }
+        RowWidgets { row, meta, spinner, primary, open, remove }
     }
 
     fn visible(&self, pos: usize) -> bool {
@@ -497,16 +531,19 @@ impl Ui {
                 r.primary.set_label("Install");
                 r.primary.show();
                 ctx.add_class("suggested-action");
+                r.open.hide();
                 r.remove.hide();
             }
             Some(_) => {
                 r.primary.set_label("Update");
                 ctx.remove_class("suggested-action");
                 r.primary.set_visible(e.has_update());
+                r.open.set_visible(can_open(app));
                 r.remove.show();
             }
         }
         r.primary.set_sensitive(!busy && !e.checking);
+        r.open.set_sensitive(!busy);
         r.remove.set_sensitive(!busy);
     }
 
@@ -716,6 +753,14 @@ impl Ui {
         });
     }
 
+    fn open(&self, i: usize) {
+        let app = &self.cat.apps[i];
+        if let Err(e) = launch(app) {
+            self.log_line(&format!("error: cannot open {}: {e}", app.name));
+            self.set_status(&format!("Cannot open {}: {e}", app.name), false);
+        }
+    }
+
     fn confirm_remove(self: &Rc<Self>, i: usize) {
         let app = &self.cat.apps[i];
         let dialog = gtk::MessageDialog::new(
@@ -827,6 +872,63 @@ impl Ui {
         dialog.connect_response(|d, _| d.close());
         dialog.show_all();
     }
+}
+
+/// True when the Open button can start the app: it names a command, or a desktop entry that exists.
+fn can_open(app: &App) -> bool {
+    match app.open.as_str() {
+        "" => false,
+        id if id.ends_with(".desktop") => desktop_entry(id).is_some(),
+        _ => true,
+    }
+}
+
+/// The file of the desktop entry `id` ("firefox.desktop"), in ~/.local/share/applications or a
+/// system data directory.
+fn desktop_entry(id: &str) -> Option<PathBuf> {
+    std::iter::once(glib::user_data_dir())
+        .chain(glib::system_data_dirs())
+        .map(|dir| dir.join("applications").join(id))
+        .find(|p| p.is_file())
+}
+
+/// Starts the app the way its Open button says: its desktop entry, or its command in a terminal.
+fn launch(app: &App) -> Result<(), String> {
+    let open = app.open.as_str();
+    if open.ends_with(".desktop") {
+        let info = gio::AppInfo::all()
+            .into_iter()
+            .find(|a| a.id().as_deref() == Some(open))
+            .ok_or_else(|| format!("{open} is not installed"))?;
+        let ctx = gtk::gdk::Display::default().and_then(|d| d.app_launch_context());
+        return info.launch(&[], ctx.as_ref()).map_err(|e| e.to_string());
+    }
+    // A login, interactive shell reads the files installers add to PATH (~/.profile, ~/.bashrc).
+    // The shell stays open after the command ends.
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| s.starts_with('/') && !s.contains('\''))
+        .unwrap_or_else(|| "/bin/bash".into());
+    let script = format!("{open}; exec '{shell}'");
+    let home = crate::catalog::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    // x-terminal-emulator is Debian's default terminal (xfce4-terminal on XFCE).
+    for (terminal, flag) in [("x-terminal-emulator", "-e"), ("xfce4-terminal", "-x"), ("gnome-terminal", "--")] {
+        let child = Command::new(terminal)
+            .arg(flag)
+            .args([shell.as_str(), "-l", "-i", "-c", &script])
+            .current_dir(&home)
+            .spawn();
+        if let Ok(child) = child {
+            reap(child);
+            return Ok(());
+        }
+    }
+    Err("no terminal found. Install one with: sudo apt install xfce4-terminal".into())
+}
+
+/// Waits for a started program in the background, so it does not stay a zombie when it exits.
+pub fn reap(mut child: Child) {
+    thread::spawn(move || child.wait());
 }
 
 fn esc(s: &str) -> String {

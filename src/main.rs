@@ -5,6 +5,8 @@
 mod catalog;
 #[cfg(feature = "gui")]
 mod gui;
+#[cfg(feature = "gui")]
+mod notifier;
 mod runner;
 mod versions;
 
@@ -14,9 +16,9 @@ use std::io::IsTerminal;
 use std::thread;
 
 const USAGE: &str = "\
-Usage: agent-center [COMMAND]
+Usage: agent-center [--updates | COMMAND]
 
-Without a command, opens the Agent Center window.
+Without a command, opens the Agent Center window (on the Updates page with --updates).
 
 Commands:
   list [--installed] [--updates]    List the apps (with the latest versions for --updates)
@@ -25,6 +27,8 @@ Commands:
   update [<app>...]                 Update apps; without names, every app with an update
   remove [--purge] <app>...         Remove apps; --purge also deletes their settings and data
   categories                        List the categories
+  notify [--now]                    Check for updates once a day and show a desktop
+                                    notification (started at login; --now checks at once)
 
 Options:
   -h, --help       Show this help
@@ -36,7 +40,7 @@ fn main() {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
-        None => open_window(),
+        None | Some("--updates") => open_window(&args),
         Some("-h" | "--help" | "help") => {
             println!("{USAGE}");
             0
@@ -46,6 +50,7 @@ fn main() {
             0
         }
         Some("askpass") => askpass(&args[1..]),
+        Some("notify") => notify(&args[1..]),
         Some("run-system") => runner::run_system(&args[1..]),
         Some("list") => list(&args[1..]),
         Some("categories") => {
@@ -68,14 +73,25 @@ fn main() {
 }
 
 #[cfg(feature = "gui")]
-fn open_window() -> i32 {
-    gui::run()
+fn open_window(args: &[String]) -> i32 {
+    gui::run(args)
 }
 
 #[cfg(not(feature = "gui"))]
-fn open_window() -> i32 {
+fn open_window(_: &[String]) -> i32 {
     println!("{USAGE}");
     0
+}
+
+#[cfg(feature = "gui")]
+fn notify(args: &[String]) -> i32 {
+    notifier::run(args)
+}
+
+#[cfg(not(feature = "gui"))]
+fn notify(_: &[String]) -> i32 {
+    eprintln!("agent-center: notifications need the window (built without the gui feature)");
+    1
 }
 
 #[cfg(feature = "gui")]

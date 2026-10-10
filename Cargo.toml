@@ -1,6 +1,6 @@
 [package]
 name = "agent-center"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.92"
 description = "A lightweight app center that cleanly installs, updates and removes AI coding tools, browsers and editors on Debian"
@@ -37,6 +37,7 @@ section = "admin"
 priority = "optional"
 depends = "$auto, curl, ca-certificates, sudo | pkexec, librsvg2-common"
 recommends = "xz-utils, bzip2, gpg"
+maintainer-scripts = "debian/"
 extended-description = """\
 Agent Center is a small app center for Debian desktops. It installs, updates and \
 removes AI coding agents (Claude Code, Codex, OpenCode, Pi, Gemini CLI...), AI \
@@ -50,6 +51,9 @@ assets = [
     ["logos/*.svg", "usr/share/agent-center/logos/", "644"],
     ["logos/SOURCES.md", "usr/share/doc/agent-center/logo-sources.md", "644"],
     ["data/agent-center.desktop", "usr/share/applications/", "644"],
+    ["data/agent-center-notify.desktop", "etc/xdg/autostart/", "644"],
+    ["data/agent-center.sources", "usr/share/agent-center/", "644"],
+    ["data/agent-center-archive-keyring.gpg", "usr/share/keyrings/", "644"],
     ["docs/logo.svg", "usr/share/icons/hicolor/scalable/apps/agent-center.svg", "644"],
     ["README.md", "usr/share/doc/agent-center/", "644"],
 ]

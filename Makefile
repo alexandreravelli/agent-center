@@ -18,11 +18,14 @@ install:
 	install -d $(DESTDIR)/usr/share/agent-center/logos
 	install -m644 logos/*.svg $(DESTDIR)/usr/share/agent-center/logos/
 	install -Dm644 data/agent-center.desktop $(DESTDIR)$(PREFIX)/share/applications/agent-center.desktop
+	install -Dm644 data/agent-center-notify.desktop $(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop
+	sed -i 's|^Exec=agent-center|Exec=$(PREFIX)/bin/agent-center|' $(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop
 	install -Dm644 docs/logo.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/agent-center.svg
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/agent-center $(DESTDIR)/usr/lib/agent-center/askpass \
 		$(DESTDIR)$(PREFIX)/share/applications/agent-center.desktop \
+		$(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop \
 		$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/agent-center.svg
 	rm -rf $(DESTDIR)/usr/share/agent-center
 	-rmdir $(DESTDIR)/usr/lib/agent-center

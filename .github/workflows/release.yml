@@ -3,6 +3,11 @@ name: Release
 # Publishes a release whenever main carries a version (Cargo.toml) that has no release yet:
 # bump `version`, add a CHANGELOG.md section, push to main.
 # A commit message containing "[rebuild release]" rebuilds the files of the current release.
+#
+# The release files are also Agent Center's APT repository: the package points APT at
+# https://github.com/<repo>/releases/latest/download/ (data/agent-center.sources), so the
+# index (Packages, InRelease) is signed with the APT_SIGNING_KEY secret, whose public key is
+# data/agent-center-archive-keyring.gpg. The release is published once every file is uploaded.
 on:
   push:
     branches: [main]
@@ -44,20 +49,53 @@ jobs:
         run: |
           apt-get update
           # dpkg-dev provides dpkg-shlibdeps, which cargo-deb uses to fill in Depends.
-          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev git dpkg-dev libgtk-3-dev pkgconf
+          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev git dpkg-dev libgtk-3-dev pkgconf \
+            apt-utils gpg gpg-agent
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Build the Debian package
         run: |
           cargo install cargo-deb --locked
           cargo deb
+      - name: Sign the APT repository
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "::error::The APT_SIGNING_KEY secret is missing (see \"APT repository\" in README.md)."
+            exit 1
+          fi
+          export GNUPGHOME="$(mktemp -d)"
+          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          # The secret must be the key the package tells APT to trust.
+          want=$(gpg --batch --with-colons --show-keys data/agent-center-archive-keyring.gpg | awk -F: '$1 == "fpr" {print $10; exit}')
+          have=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" {print $10; exit}')
+          if [ "$want" != "$have" ]; then
+            echo "::error::APT_SIGNING_KEY ($have) is not the key in data/agent-center-archive-keyring.gpg ($want)."
+            exit 1
+          fi
+          # A flat repository whose files sit next to each other in the release ("download/" is the
+          # last part of the URL, and the Suites value in agent-center.sources).
+          mkdir -p apt/download
+          cp target/debian/*.deb apt/download/
+          cd apt
+          apt-ftparchive packages download > download/Packages
+          gzip -9kn download/Packages
+          apt-ftparchive -o APT::FTPArchive::Release::Origin="Agent Center" \
+            -o APT::FTPArchive::Release::Label="Agent Center" \
+            -o APT::FTPArchive::Release::Suite=download release download > Release
+          mv Release download/Release
+          gpg --batch --clearsign -o download/InRelease download/Release
+          gpg --batch --armor --detach-sign -o download/Release.gpg download/Release
       - name: Prepare release files
         run: |
           mkdir dist
-          cp target/debian/*.deb dist/
+          cp apt/download/* dist/
+          # The same package under a name that does not change, for the install instructions.
+          cp target/debian/*.deb dist/agent-center_amd64.deb
           tar czf "dist/agent-center-v${VERSION}-x86_64-linux.tar.gz" \
             -C target/release agent-center \
-            -C "$GITHUB_WORKSPACE" README.md LICENSE Makefile catalog logos data docs/logo.svg
+            -C "$GITHUB_WORKSPACE" README.md LICENSE Makefile catalog logos data debian docs/logo.svg
           (cd dist && sha256sum * > SHA256SUMS)
           # Release notes: this version's section of the changelog.
           awk -v v="$VERSION" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
@@ -68,3 +106,13 @@ jobs:
           name: Agent Center v${{ env.VERSION }}
           body_path: notes.md
           files: dist/*
+          # Published by the next job, once every file is there: APT reads the latest release.
+          draft: true
+
+  publish:
+    needs: [check, release]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ needs.check.outputs.version }}" --draft=false --latest --repo "$GITHUB_REPOSITORY"

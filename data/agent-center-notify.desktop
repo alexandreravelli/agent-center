@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Agent Center Updates
+Comment=Tells you when the apps installed with Agent Center have new versions
+Exec=agent-center notify
+Icon=agent-center
+Terminal=false

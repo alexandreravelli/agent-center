@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 - 2026-10-10
+
+- Agent Center has its own APT repository, signed and added by the package, so `apt upgrade` installs new versions. Removing the package removes it.
+- *Open* button on installed apps: desktop apps start, and command-line agents open in a terminal.
+- Update notifications: `agent-center notify`, started at login, checks once a day and shows a desktop notification for new versions. Clicking it opens the Updates page.
+- `agent-center --updates` opens the window on the Updates page, or switches the open window to it.
+- New app: Cursor CLI (38 apps).
+- The release files include `agent-center_amd64.deb`, a copy of the package under a name that does not change.
+
 ## 0.1.0 - 2026-10-10
 
 First release.

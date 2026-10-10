@@ -1,0 +1,8 @@
+#!/bin/sh
+# Adds Agent Center's APT repository (the latest GitHub release), so `apt upgrade` updates it.
+# An existing file is kept as it is, so "Enabled: no" in it stays.
+set -e
+if [ "$1" = configure ] && [ ! -e /etc/apt/sources.list.d/agent-center.sources ]; then
+    cp /usr/share/agent-center/agent-center.sources /etc/apt/sources.list.d/agent-center.sources
+fi
+exit 0

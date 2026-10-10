@@ -1,0 +1,7 @@
+#!/bin/sh
+# Removing Agent Center also removes its APT repository.
+set -e
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    rm -f /etc/apt/sources.list.d/agent-center.sources
+fi
+exit 0
