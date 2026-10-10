@@ -62,10 +62,24 @@ jobs:
             echo "::error::The APT_SIGNING_KEY secret is missing (see \"APT repository\" in README.md)."
             exit 1
           fi
+          case "$APT_SIGNING_KEY" in
+            *"BEGIN PGP PRIVATE KEY BLOCK"*) ;;
+            *"BEGIN PGP PUBLIC KEY BLOCK"*)
+              echo "::error::APT_SIGNING_KEY holds the public key; it needs the private key (gpg --armor --export-secret-keys)."
+              exit 1 ;;
+            *)
+              echo "::error::APT_SIGNING_KEY is not an armored private key (-----BEGIN PGP PRIVATE KEY BLOCK-----)."
+              exit 1 ;;
+          esac
           GNUPGHOME="$(mktemp -d)"
           export GNUPGHOME
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
-          printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import
+          # Only gpg's own messages are reported: some of its lines quote the bad input.
+          if ! out=$(printf '%s\n' "$APT_SIGNING_KEY" | gpg --batch --import 2>&1); then
+            why=$(printf '%s\n' "$out" | grep -E 'no valid OpenPGP data|failed:|agent' | head -n 2 | tr '\n' ' ')
+            echo "::error::gpg cannot import APT_SIGNING_KEY: ${why:-unknown error}"
+            exit 1
+          fi
           have=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" {print $10; exit}')
           if [ -z "$have" ]; then
             echo "::error::APT_SIGNING_KEY holds no private key."
