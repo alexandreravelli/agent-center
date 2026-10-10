@@ -1,0 +1,176 @@
+# Desktop apps for AI assistants and coding agents.
+
+[[app]]
+id = "claude-desktop"
+name = "Claude Desktop"
+category = "apps"
+summary = "Anthropic's Claude app for Linux (beta), with Claude Code built in."
+homepage = "https://code.claude.com/docs/en/desktop-linux"
+logo = "claude"
+icon = "claude-desktop"
+color = "#d97757"
+badge = "Cl"
+scope = "system"
+method = "Anthropic APT repository"
+version = "deb_version claude-desktop"
+latest = "cmd:repo_version https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64 claude-desktop"
+install = '''
+apt_key https://downloads.claude.ai/claude-desktop/key.asc /usr/share/keyrings/claude-desktop-archive-keyring.asc
+echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
+    > /etc/apt/sources.list.d/claude-desktop.list
+apt_install claude-desktop
+'''
+update = "apt_upgrade claude-desktop"
+remove = '''
+apt_purge claude-desktop
+drop /etc/apt/sources.list.d/claude-desktop.list /usr/share/keyrings/claude-desktop-archive-keyring.asc
+'''
+purge = ["~/.config/Claude"]
+notes = """
+Beta. Signing in needs a keyring service such as gnome-keyring on XFCE. The Cowork tab needs \
+KVM in the VM (nested virtualization); Computer Use and dictation are not available on Linux."""
+
+[[app]]
+id = "chatgpt"
+name = "ChatGPT"
+category = "apps"
+featured = true
+summary = "OpenAI's ChatGPT and Codex desktop app for Linux (preview)."
+homepage = "https://learn.chatgpt.com/docs/linux/linux-app"
+icon = "chatgpt"
+color = "#10a37f"
+badge = "Gp"
+scope = "system"
+method = "OpenAI .deb (adds OpenAI's APT repository)"
+version = "deb_version chatgpt"
+latest = "apt:chatgpt"
+install = '''
+case "$ARCH" in amd64|arm64) ;; *) die "ChatGPT is only built for amd64 and arm64";; esac
+deb_from_url "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_$ARCH.deb"
+'''
+update = "apt_upgrade chatgpt"
+remove = '''
+apt_purge chatgpt
+# The repository the package configured, if its removal left it behind.
+for f in /etc/apt/sources.list.d/*chatgpt* /etc/apt/sources.list.d/*openai*; do
+    [ -e "$f" ] && drop "$f"
+done
+true
+'''
+purge = ["~/.config/ChatGPT"]
+notes = "Preview. The package configures OpenAI's signed APT repository, so updates come through apt."
+
+[[app]]
+id = "t3-code"
+name = "T3 Code"
+category = "apps"
+summary = "A desktop control surface for coding agents like Claude Code, Codex and OpenCode."
+homepage = "https://github.com/pingdotgg/t3code"
+icon = "t3-code"
+logo_background = "#000000"
+color = "#a855f7"
+badge = "T3"
+scope = "system"
+method = ".deb from GitHub releases"
+version = 'deb_version "$(deb_of t3-code)"'
+latest = "github:pingdotgg/t3code"
+install = '''
+[ "$ARCH" = amd64 ] || die "T3 Code publishes .deb packages for amd64 only"
+deb_from_url "$(gh_asset pingdotgg/t3code '^https://.*/T3-Code-[0-9.]+-amd64\.deb$')" t3-code
+'''
+remove = "deb_forget t3-code"
+purge = ["~/.t3"]
+notes = """
+Early alpha. T3 Code drives agents you install separately (Claude Code, Codex, OpenCode...). \
+The .deb adds no APT repository, so Agent Center updates it by installing the newest release."""
+
+[[app]]
+id = "opencode-desktop"
+name = "OpenCode Desktop"
+category = "apps"
+summary = "The OpenCode agent in a desktop window."
+homepage = "https://opencode.ai/download"
+logo = "opencode"
+icon = "opencode"
+color = "#211e1e"
+badge = "oc"
+scope = "system"
+method = ".deb from opencode.ai"
+version = 'deb_version "$(deb_of opencode-desktop)"'
+latest = "github:anomalyco/opencode"
+install = '''
+[ "$ARCH" = amd64 ] || die "OpenCode Desktop publishes .deb packages for amd64 only"
+deb_from_url https://opencode.ai/download/stable/linux-x64-deb opencode-desktop
+'''
+remove = "deb_forget opencode-desktop"
+notes = "The .deb adds no APT repository, so Agent Center updates it by installing the newest release."
+
+[[app]]
+id = "hermes-desktop"
+name = "Hermes Desktop"
+category = "apps"
+summary = "The desktop chat app for Hermes Agent, built on this computer."
+homepage = "https://hermes-agent.nousresearch.com/docs/user-guide/desktop"
+logo = "hermes"
+icon = "hermes"
+color = "#7c3aed"
+badge = "H"
+scope = "user"
+method = "built locally by Hermes Agent"
+requires = ["hermes-agent", "nodejs"]
+version = '''
+[ -f "${HERMES_HOME:-$HOME/.hermes}/desktop-build-stamp.json" ] && "$HOME/.local/bin/hermes" --version
+'''
+latest = "pypi:hermes-agent"
+install = '"$HOME/.local/bin/hermes" desktop --build-only'
+update = '"$HOME/.local/bin/hermes" update'
+remove = '"$HOME/.local/bin/hermes" uninstall --gui --yes'
+notes = """
+Nous Research does not publish a Linux package: `hermes desktop --build-only` builds the \
+Electron app from the Hermes Agent sources (a few minutes, needs Node.js). Start it once with \
+`hermes desktop --skip-build`: that adds Hermes to the applications menu. `hermes update` \
+updates the agent and rebuilds the app. Removing it keeps the agent, your config and chats."""
+
+[[app]]
+id = "openclaw-desktop"
+name = "OpenClaw Desktop"
+category = "apps"
+summary = "The OpenClaw companion app for Linux."
+homepage = "https://docs.openclaw.ai/platforms/linux"
+logo = "openclaw"
+icon = "openclaw"
+color = "#e8492f"
+badge = "Cw"
+scope = "system"
+method = ".deb from GitHub releases"
+requires = ["openclaw"]
+version = 'deb_version "$(deb_of openclaw-desktop)"'
+latest = "github:openclaw/openclaw"
+install = '''
+[ "$ARCH" = amd64 ] || die "OpenClaw Desktop publishes .deb packages for amd64 only"
+deb_from_url "$(gh_asset openclaw/openclaw '^https://.*/OpenClaw-[0-9.]+-amd64\.deb$')" openclaw-desktop
+'''
+remove = "deb_forget openclaw-desktop"
+notes = "The gateway it controls is managed by the OpenClaw CLI. The .deb adds no APT repository: Agent Center updates it."
+
+[[app]]
+id = "goose-desktop"
+name = "Goose Desktop"
+category = "apps"
+summary = "The Goose AI agent in a desktop window."
+homepage = "https://block.github.io/goose/docs/getting-started/installation"
+logo = "goose"
+icon = "goose"
+color = "#000000"
+badge = "G"
+scope = "system"
+method = ".deb from GitHub releases"
+version = 'deb_version "$(deb_of goose-desktop)"'
+latest = "github:aaif-goose/goose"
+install = '''
+[ "$ARCH" = amd64 ] || die "Goose Desktop publishes .deb packages for amd64 only"
+deb_from_url "$(gh_asset aaif-goose/goose '^https://.*/goose_[0-9.]+_amd64\.deb$')" goose-desktop
+'''
+remove = "deb_forget goose-desktop"
+purge = ["~/.config/goose", "~/.local/share/goose"]
+notes = "Shares its settings with the Goose CLI. The .deb adds no APT repository: Agent Center updates it."

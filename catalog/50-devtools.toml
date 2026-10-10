@@ -1,0 +1,100 @@
+# Runtimes and command-line tools the other apps build on.
+
+[[app]]
+id = "nodejs"
+name = "Node.js LTS"
+category = "devtools"
+summary = "JavaScript runtime with npm, needed by the npm-based agents."
+homepage = "https://nodejs.org/en/download"
+icon = "nodejs"
+color = "#5fa04e"
+badge = "N"
+scope = "system"
+method = "nodejs.org tarball, in /usr/local"
+version = "test -x /usr/local/bin/node && /usr/local/bin/node --version"
+# The newest LTS release of the installed major version (any LTS when Node.js is absent).
+latest = '''cmd:major=$(/usr/local/bin/node --version 2>/dev/null | sed -n 's/^v\([0-9]*\)\..*/\1/p')
+curl -fsSL https://nodejs.org/dist/index.json | grep -o "\"version\":\"v${major:-[0-9]*}\.[0-9.]*\"[^}]*\"lts\":\"" | head -n 1'''
+install = '''
+case "$ARCH" in amd64) a=x64;; arm64) a=arm64;; *) die "no Node.js build for $ARCH";; esac
+need xz "Install it with: sudo apt install xz-utils"
+# Stay on the installed major version; a new install takes the newest LTS.
+major=$(/usr/local/bin/node --version 2>/dev/null | sed -n 's/^v\([0-9]*\)\..*/\1/p')
+ver=$(curl -fsSL https://nodejs.org/dist/index.json \
+    | grep -o "\"version\":\"v${major:-[0-9]*}\.[0-9.]*\"[^}]*\"lts\":\"" | head -n 1 \
+    | sed 's/^"version":"\(v[0-9.]*\)".*/\1/')
+[ -n "$ver" ] || die "cannot find the latest Node.js LTS release"
+file="node-$ver-linux-$a.tar.xz"
+log "Downloading Node.js $ver"
+download "https://nodejs.org/dist/$ver/$file" >/dev/null
+download "https://nodejs.org/dist/$ver/SHASUMS256.txt" >/dev/null
+(cd "$AC_TMP" && grep " $file\$" SHASUMS256.txt | sha256sum -c -) || die "checksum mismatch for $file"
+# npm and corepack are replaced as a whole so no file of the old version stays behind.
+rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/include/node
+log "Extracting into /usr/local"
+tar -xJf "$AC_TMP/$file" -C /usr/local --strip-components=1 --no-same-owner \
+    --exclude="${file%.tar.xz}/CHANGELOG.md" --exclude="${file%.tar.xz}/LICENSE" --exclude="${file%.tar.xz}/README.md"
+/usr/local/bin/node --version
+'''
+remove = '''
+log "Removing Node.js from /usr/local"
+rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+rm -rf /usr/local/include/node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/share/doc/node
+rm -f /usr/local/share/man/man1/node.1 /usr/local/share/systemtap/tapset/node.stp
+rmdir /usr/local/lib/node_modules 2>/dev/null || true
+'''
+purge = ["~/.npm"]
+notes = """
+The official tarball from nodejs.org, checked against its SHA-256 sums and unpacked into \
+/usr/local. Updates stay on the installed major version (24.x stays 24.x). Removing Node.js \
+keeps the global npm packages in /usr/local/lib/node_modules: remove those apps first."""
+
+[[app]]
+id = "uv"
+name = "uv"
+category = "devtools"
+summary = "Astral's fast Python package and project manager, used by Aider."
+homepage = "https://docs.astral.sh/uv/getting-started/installation/"
+color = "#de5fe9"
+badge = "uv"
+scope = "user"
+method = "uv install script, in ~/.local/bin"
+version = 'test -x "$HOME/.local/bin/uv" && "$HOME/.local/bin/uv" --version'
+latest = "github:astral-sh/uv"
+install = "run_installer https://astral.sh/uv/install.sh"
+update = '"$HOME/.local/bin/uv" self update'
+remove = '''
+uv=$HOME/.local/bin/uv
+if [ -x "$uv" ]; then
+    "$uv" cache clean
+    rm -rf "$("$uv" python dir)" "$("$uv" tool dir)"
+fi
+rm -f "$uv" "$HOME/.local/bin/uvx"
+'''
+notes = "Removing uv also removes the Python versions and tools it installed (such as Aider)."
+
+[[app]]
+id = "gh"
+name = "GitHub CLI"
+category = "devtools"
+summary = "GitHub on the command line: pull requests, issues, releases."
+homepage = "https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
+color = "#24292f"
+badge = "gh"
+scope = "system"
+method = "GitHub CLI APT repository"
+version = "deb_version gh"
+latest = "github:cli/cli"
+install = '''
+apt_key https://cli.github.com/packages/githubcli-archive-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$ARCH signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list
+apt_install gh
+'''
+update = "apt_upgrade gh"
+remove = '''
+apt_purge gh
+drop /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg
+'''
+purge = ["~/.config/gh"]

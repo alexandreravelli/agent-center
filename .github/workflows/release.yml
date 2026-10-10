@@ -1,0 +1,70 @@
+name: Release
+
+# Publishes a release whenever main carries a version (Cargo.toml) that has no release yet:
+# bump `version`, add a CHANGELOG.md section, push to main.
+# A commit message containing "[rebuild release]" rebuilds the files of the current release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.version.outputs.released }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f 2)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" > /dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.released == 'false' || contains(github.event.head_commit.message, '[rebuild release]')
+    runs-on: ubuntu-latest
+    # Build on Debian 13 so the binary matches the target system's glibc.
+    container: debian:trixie
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          # dpkg-dev provides dpkg-shlibdeps, which cargo-deb uses to fill in Depends.
+          apt-get install -y --no-install-recommends ca-certificates curl gcc libc6-dev git dpkg-dev libgtk-3-dev pkgconf
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the Debian package
+        run: |
+          cargo install cargo-deb --locked
+          cargo deb
+      - name: Prepare release files
+        run: |
+          mkdir dist
+          cp target/debian/*.deb dist/
+          tar czf "dist/agent-center-v${VERSION}-x86_64-linux.tar.gz" \
+            -C target/release agent-center \
+            -C "$GITHUB_WORKSPACE" README.md LICENSE Makefile catalog logos data docs/logo.svg
+          (cd dist && sha256sum * > SHA256SUMS)
+          # Release notes: this version's section of the changelog.
+          awk -v v="$VERSION" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Agent Center v${{ env.VERSION }}
+          body_path: notes.md
+          files: dist/*

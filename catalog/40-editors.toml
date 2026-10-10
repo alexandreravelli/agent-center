@@ -1,0 +1,207 @@
+# Code editors and AI-first IDEs.
+
+[[app]]
+id = "vscodium"
+name = "VSCodium"
+category = "editors"
+summary = "VS Code without Microsoft's telemetry and branding, built from the open-source code."
+homepage = "https://vscodium.com/"
+icon = "vscodium"
+color = "#2f80ed"
+badge = "Vc"
+scope = "system"
+method = "VSCodium APT repository"
+version = "deb_version codium"
+latest = "github:VSCodium/vscodium"
+install = '''
+apt_key https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg /usr/share/keyrings/vscodium-archive-keyring.gpg
+cat > /etc/apt/sources.list.d/vscodium.sources <<'EOF'
+Types: deb
+URIs: https://download.vscodium.com/debs
+Suites: vscodium
+Components: main
+Architectures: amd64 arm64
+Signed-by: /usr/share/keyrings/vscodium-archive-keyring.gpg
+EOF
+apt_install codium
+'''
+update = "apt_upgrade codium"
+remove = '''
+apt_purge codium
+drop /etc/apt/sources.list.d/vscodium.sources /usr/share/keyrings/vscodium-archive-keyring.gpg
+'''
+purge = ["~/.config/VSCodium", "~/.vscode-oss"]
+notes = "Extensions come from Open VSX."
+
+[[app]]
+id = "vscode"
+name = "Visual Studio Code"
+category = "editors"
+summary = "Microsoft's code editor."
+homepage = "https://code.visualstudio.com/docs/setup/linux"
+icon = "vscode"
+color = "#007acc"
+badge = "VS"
+scope = "system"
+method = "Microsoft APT repository"
+version = "deb_version code"
+latest = "cmd:repo_version https://packages.microsoft.com/repos/code/dists/stable/main/binary-amd64 code"
+install = '''
+apt_key https://packages.microsoft.com/keys/microsoft.asc /usr/share/keyrings/microsoft.gpg
+cat > /etc/apt/sources.list.d/vscode.sources <<'EOF'
+Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64,arm64,armhf
+Signed-By: /usr/share/keyrings/microsoft.gpg
+EOF
+apt_install code
+'''
+update = "apt_upgrade code"
+remove = '''
+apt_purge code
+drop /etc/apt/sources.list.d/vscode.sources /etc/apt/sources.list.d/vscode.list /usr/share/keyrings/microsoft.gpg
+'''
+purge = ["~/.config/Code", "~/.vscode", "~/.vscode-shared"]
+notes = "Microsoft's repository can trail a new release by up to three hours."
+
+[[app]]
+id = "cursor"
+name = "Cursor"
+category = "editors"
+summary = "AI code editor built on VS Code, from Anysphere."
+homepage = "https://cursor.com/downloads"
+icon = "cursor"
+color = "#0f0f0f"
+badge = "Cu"
+scope = "system"
+method = ".deb from cursor.com"
+version = "deb_version cursor"
+latest = "cmd:curl -fsSL https://cursor.com/downloads | grep -o 'linux-x64-deb/cursor/[0-9][0-9.]*' | head -n 1"
+install = '''
+[ "$ARCH" = amd64 ] || die "Agent Center installs the amd64 build of Cursor"
+url=$(curl -fsSL https://cursor.com/downloads \
+    | grep -o 'https://api2.cursor.sh/updates/download/golden/linux-x64-deb/cursor/[0-9][0-9.]*' | head -n 1)
+[ -n "$url" ] || die "cannot find the Cursor .deb on https://cursor.com/downloads"
+deb_from_url "$url"
+'''
+remove = '''
+apt_purge cursor
+for f in /etc/apt/sources.list.d/cursor.list /etc/apt/sources.list.d/cursor.sources; do
+    [ -e "$f" ] && drop "$f"
+done
+true
+'''
+purge = ["~/.config/Cursor", "~/.cursor"]
+notes = """
+Installs the newest .deb listed on cursor.com/downloads; updating installs the newest one \
+again. Cursor documents no APT repository."""
+
+[[app]]
+id = "zed"
+name = "Zed"
+category = "editors"
+summary = "Fast, collaborative code editor written in Rust, with AI built in."
+homepage = "https://zed.dev/docs/linux"
+icon = "zed"
+color = "#084ccf"
+badge = "Z"
+scope = "user"
+method = "Zed install script, in ~/.local/zed.app"
+version = 'test -x "$HOME/.local/zed.app/bin/zed" && "$HOME/.local/zed.app/bin/zed" --version'
+latest = "github:zed-industries/zed"
+install = "run_installer https://zed.dev/install.sh"
+remove = '''
+log "Removing ~/.local/zed.app"
+rm -rf "$HOME/.local/zed.app"
+rm -f "$HOME/.local/bin/zed" "$HOME/.local/share/applications/dev.zed.Zed.desktop"
+'''
+purge = ["~/.config/zed", "~/.local/share/zed"]
+notes = """
+Zed draws with Vulkan. Without a GPU it needs Mesa's software Vulkan driver \
+(sudo apt install mesa-vulkan-drivers) and can feel slow. Zed updates itself; running the \
+installer again also updates it."""
+
+[[app]]
+id = "windsurf"
+name = "Windsurf"
+category = "editors"
+summary = "Cognition's agentic IDE, now named Devin Desktop."
+homepage = "https://docs.devin.ai/desktop/getting-started"
+icon = "windsurf"
+color = "#0b100f"
+badge = "W"
+scope = "system"
+method = "Windsurf APT repository"
+version = "deb_version devin-desktop"
+latest = "cmd:repo_version https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt/dists/stable/main/binary-amd64 devin-desktop"
+install = '''
+apt_key "https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/windsurf.gpg" /etc/apt/keyrings/windsurf-stable.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/windsurf-stable.gpg] https://windsurf-stable.codeiumdata.com/wVxQEIWkwPUEAGf3/apt stable main" \
+    > /etc/apt/sources.list.d/windsurf.list
+apt_install devin-desktop
+'''
+update = "apt_upgrade devin-desktop"
+remove = '''
+apt_purge devin-desktop
+if [ -n "$(deb_version windsurf)" ]; then apt_purge windsurf; fi
+drop /etc/apt/sources.list.d/windsurf.list /etc/apt/keyrings/windsurf-stable.gpg
+'''
+purge = ["~/.codeium/windsurf", "~/.config/Windsurf"]
+notes = "The package is devin-desktop; `windsurf` is now a transitional package for it."
+
+[[app]]
+id = "antigravity"
+name = "Antigravity"
+category = "editors"
+summary = "Google's agent-first IDE."
+homepage = "https://antigravity.google/download?os=linux"
+icon = "antigravity"
+color = "#3c7bf4"
+badge = "Ag"
+scope = "user"
+method = "Google's Linux tarball, in ~/.local/share/antigravity-ide"
+version = 'cat "$HOME/.local/share/antigravity-ide/.agent-center-version"'
+install = '''
+[ "$ARCH" = amd64 ] || die "Agent Center installs the x64 build of Antigravity"
+version=2.5.5
+tgz=$(download "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.5.5-4923483625488384/linux-x64/Antigravity%20IDE.tar.gz" antigravity.tar.gz)
+mkdir "$AC_TMP/x"
+log "Extracting"
+tar -xzf "$tgz" -C "$AC_TMP/x"
+src="$AC_TMP/x"
+set -- "$src"/*
+if [ $# -eq 1 ] && [ -d "$1" ]; then src=$1; fi
+dest="$HOME/.local/share/antigravity-ide"
+rm -rf "$dest"
+mkdir -p "$HOME/.local/share" "$HOME/.local/bin" "$HOME/.local/share/applications"
+mv "$src" "$dest"
+bin=$(find "$dest" -maxdepth 1 -type f -perm -u+x \( -iname 'antigravity*' \) | head -n 1)
+[ -n "$bin" ] || die "cannot find the Antigravity program in the download"
+icon=$(find "$dest/resources" -path '*linux*' -name '*.png' 2>/dev/null | head -n 1)
+ln -sf "$bin" "$HOME/.local/bin/antigravity"
+cat > "$HOME/.local/share/applications/antigravity-ide.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Antigravity
+Comment=Google's agent-first IDE
+Exec="$bin" %F
+Icon=${icon:-antigravity}
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=Antigravity
+EOF
+echo "$version" > "$dest/.agent-center-version"
+'''
+update = 'log "Antigravity updates itself: it asks when a new version is available."'
+remove = '''
+log "Removing ~/.local/share/antigravity-ide"
+rm -rf "$HOME/.local/share/antigravity-ide"
+rm -f "$HOME/.local/bin/antigravity" "$HOME/.local/share/applications/antigravity-ide.desktop"
+'''
+purge = ["~/.config/Antigravity", "~/.antigravity", "~/.gemini/antigravity"]
+notes = """
+Google only publishes versioned tarballs for Linux (its APT repository is for the retired 1.x \
+releases). Agent Center unpacks version 2.5.5 into your home directory, where the IDE updates \
+itself, and adds a menu entry."""

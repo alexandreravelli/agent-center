@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3b8beb"/>
+      <stop offset="1" stop-color="#1f3f9a"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+  <!-- crane -->
+  <rect x="24" y="22" width="7" height="84" rx="3" fill="#ffffff" fill-opacity="0.92"/>
+  <rect x="24" y="22" width="76" height="7" rx="3" fill="#ffffff" fill-opacity="0.92"/>
+  <path d="M31 29 L48 29 L31 46 Z" fill="#ffffff" fill-opacity="0.55"/>
+  <rect x="80.5" y="29" width="3" height="16" fill="#ffffff" fill-opacity="0.85"/>
+  <!-- package being lowered -->
+  <rect x="68" y="45" width="28" height="24" rx="5" fill="#ffd27a"/>
+  <path d="M82 50 v9 m-4.5 -4.5 l4.5 4.5 l4.5 -4.5" stroke="#1f3f9a" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- stack on the quay -->
+  <rect x="40" y="88" width="26" height="18" rx="5" fill="#ffffff"/>
+  <rect x="70" y="88" width="26" height="18" rx="5" fill="#ffffff" fill-opacity="0.75"/>
+  <rect x="18" y="106" width="92" height="6" rx="3" fill="#0f1f4d" fill-opacity="0.55"/>
+</svg>

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Password window for sudo (SUDO_ASKPASS): sudo runs it with the prompt as its argument.
+exec /usr/bin/agent-center askpass "$@"

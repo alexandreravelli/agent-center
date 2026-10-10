@@ -1,0 +1,32 @@
+# Agent Center categories, in sidebar order.
+# Apps name their category with `category = "<id>"`. Icons are names from the icon theme.
+
+[[category]]
+id = "agents"
+name = "AI Agents"
+icon = "utilities-terminal-symbolic"
+summary = "AI agents you run from the terminal: coding agents and personal assistants."
+
+[[category]]
+id = "apps"
+name = "AI Apps"
+icon = "applications-science-symbolic"
+summary = "Desktop apps for AI assistants and coding agents."
+
+[[category]]
+id = "browsers"
+name = "Browsers"
+icon = "web-browser-symbolic"
+summary = "Web browsers, installed the way their vendors recommend."
+
+[[category]]
+id = "editors"
+name = "IDEs & Editors"
+icon = "accessories-text-editor-symbolic"
+summary = "Code editors and AI-first IDEs."
+
+[[category]]
+id = "devtools"
+name = "Developer Tools"
+icon = "applications-engineering-symbolic"
+summary = "Runtimes and command-line tools the other apps build on."

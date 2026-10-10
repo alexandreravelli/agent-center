@@ -1,0 +1,308 @@
+# AI coding agents for the terminal.
+#
+# Each recipe follows the vendor's documented method. Scripts run with `sh` (dash) after the
+# helper functions shown by `agent-center info <app>`; `scope = "system"` scripts run as root.
+
+[[app]]
+id = "claude-code"
+name = "Claude Code"
+category = "agents"
+featured = true
+summary = "Anthropic's agentic coding tool: reads your code, edits files and runs commands."
+homepage = "https://code.claude.com/docs/en/setup"
+logo = "claude"
+color = "#d97757"
+badge = "Cl"
+scope = "system"
+method = "Anthropic APT repository (stable channel)"
+version = "deb_version claude-code"
+latest = "cmd:repo_version https://downloads.claude.ai/claude-code/apt/stable/dists/stable/main/binary-amd64 claude-code"
+install = '''
+apt_key https://downloads.claude.ai/keys/claude-code.asc /etc/apt/keyrings/claude-code.asc
+echo "deb [signed-by=/etc/apt/keyrings/claude-code.asc] https://downloads.claude.ai/claude-code/apt/stable stable main" \
+    > /etc/apt/sources.list.d/claude-code.list
+apt_install claude-code
+'''
+update = "apt_upgrade claude-code"
+remove = '''
+apt_purge claude-code
+drop /etc/apt/sources.list.d/claude-code.list /etc/apt/keyrings/claude-code.asc
+'''
+purge = ["~/.claude", "~/.claude.json"]
+notes = """
+Installed for all users from Anthropic's signed APT repository (key fingerprint \
+31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE). The stable channel is about a week behind the latest \
+release and skips releases with major regressions. Package installs do not update themselves: \
+Agent Center (or apt upgrade) updates them. If you also used the native installer, remove \
+~/.local/bin/claude and ~/.local/share/claude so only one copy remains."""
+
+[[app]]
+id = "codex"
+name = "Codex CLI"
+category = "agents"
+summary = "OpenAI's coding agent that runs locally in your terminal."
+homepage = "https://github.com/openai/codex"
+color = "#10a37f"
+badge = "Cx"
+scope = "system"
+method = "npm package @openai/codex"
+requires = ["nodejs"]
+version = "npm_version @openai/codex"
+latest = "npm:@openai/codex"
+install = "npm_global @openai/codex@latest"
+remove = "npm_remove @openai/codex"
+purge = ["~/.codex"]
+notes = "Sign in with `codex` (ChatGPT account) or an API key. Settings, sessions and sign-in are kept in ~/.codex."
+
+[[app]]
+id = "gemini-cli"
+name = "Gemini CLI"
+category = "agents"
+summary = "Google's open-source AI agent for the terminal."
+homepage = "https://geminicli.com/docs/get-started/installation/"
+color = "#4285f4"
+badge = "Gm"
+scope = "system"
+method = "npm package @google/gemini-cli"
+requires = ["nodejs"]
+version = "npm_version @google/gemini-cli"
+latest = "npm:@google/gemini-cli"
+install = "npm_global @google/gemini-cli@latest"
+remove = "npm_remove @google/gemini-cli"
+purge = ["~/.gemini"]
+notes = """
+Google moved unpaid and Google One users to Antigravity CLI in June 2026; the Gemini CLI \
+package is still published. ~/.gemini also holds Antigravity settings."""
+
+[[app]]
+id = "copilot-cli"
+name = "GitHub Copilot CLI"
+category = "agents"
+summary = "GitHub Copilot's coding agent in the terminal."
+homepage = "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli"
+color = "#24292f"
+badge = "Co"
+scope = "system"
+method = "npm package @github/copilot"
+requires = ["nodejs"]
+version = "npm_version @github/copilot"
+latest = "npm:@github/copilot"
+install = "npm_global @github/copilot@latest"
+remove = "npm_remove @github/copilot"
+purge = ["~/.copilot"]
+notes = "Needs a GitHub Copilot subscription. Run `copilot` and use /login."
+
+[[app]]
+id = "opencode"
+name = "OpenCode"
+category = "agents"
+summary = "Open-source coding agent for the terminal, works with many model providers."
+homepage = "https://opencode.ai/docs/"
+color = "#211e1e"
+badge = "oc"
+scope = "user"
+method = "OpenCode install script, in ~/.opencode"
+version = 'test -x "$HOME/.opencode/bin/opencode" && "$HOME/.opencode/bin/opencode" --version'
+latest = "npm:opencode-ai"
+install = "run_installer https://opencode.ai/install"
+update = '"$HOME/.opencode/bin/opencode" upgrade'
+remove = '''
+oc="$HOME/.opencode/bin/opencode"
+if [ -x "$oc" ] && [ "${AC_PURGE:-0}" = 1 ]; then
+    "$oc" uninstall --force
+elif [ -x "$oc" ]; then
+    "$oc" uninstall --force --keep-config --keep-data
+fi
+rm -rf "$HOME/.opencode"
+'''
+purge = ["~/.config/opencode", "~/.local/share/opencode", "~/.cache/opencode"]
+notes = """
+Installed for your user in ~/.opencode/bin (the installer adds it to PATH in your shell \
+profile). OpenCode updates itself at startup; `opencode uninstall` removes it."""
+
+[[app]]
+id = "pi"
+name = "Pi"
+category = "agents"
+summary = "Minimal, extensible terminal coding agent from Earendil."
+homepage = "https://pi.dev/"
+color = "#6e56cf"
+badge = "π"
+scope = "system"
+method = "npm package @earendil-works/pi-coding-agent"
+requires = ["nodejs"]
+version = "npm_version @earendil-works/pi-coding-agent"
+latest = "npm:@earendil-works/pi-coding-agent"
+install = '''
+# The package's old name is deprecated: replace it.
+if [ -n "$(npm_version @mariozechner/pi-coding-agent)" ]; then npm_remove @mariozechner/pi-coding-agent; fi
+npm_global --ignore-scripts @earendil-works/pi-coding-agent@latest
+'''
+remove = "npm_remove @earendil-works/pi-coding-agent"
+purge = ["~/.pi"]
+notes = "Pi needs Node.js 22.19 or newer. Its settings, credentials, sessions and Pi packages are in ~/.pi/agent."
+
+[[app]]
+id = "cline"
+name = "Cline CLI"
+category = "agents"
+summary = "The Cline coding agent in your terminal."
+homepage = "https://docs.cline.bot/cline-cli/installation"
+color = "#1f6feb"
+badge = "Cn"
+scope = "system"
+method = "npm package cline"
+requires = ["nodejs"]
+version = "npm_version cline"
+latest = "npm:cline"
+install = "npm_global cline@latest"
+remove = "npm_remove cline"
+purge = ["~/.cline"]
+notes = "Run `cline auth` to sign in. The VS Code extension is a separate install (saoudrizwan.claude-dev)."
+
+[[app]]
+id = "kilo"
+name = "Kilo Code CLI"
+category = "agents"
+summary = "Open-source agentic engineering platform, as `kilo` in your terminal."
+homepage = "https://kilo.ai/docs/cli"
+color = "#f8f676"
+badge = "K"
+scope = "system"
+method = "npm package @kilocode/cli"
+requires = ["nodejs"]
+version = "npm_version @kilocode/cli"
+latest = "npm:@kilocode/cli"
+install = "npm_global @kilocode/cli@latest"
+remove = "npm_remove @kilocode/cli"
+purge = ["~/.config/kilo", "~/.local/share/kilo", "~/.cache/kilo", "~/.local/state/kilo"]
+notes = "Provides the `kilo` and `kilocode` commands. The VS Code extension is a separate install (kilocode.kilo-code)."
+
+[[app]]
+id = "aider"
+name = "Aider"
+category = "agents"
+summary = "AI pair programming in your terminal, works with Git."
+homepage = "https://aider.chat/docs/install.html"
+color = "#14b014"
+badge = "Ai"
+scope = "user"
+method = "uv tool (Python 3.12)"
+requires = ["uv"]
+version = "have aider && aider --version"
+latest = "pypi:aider-chat"
+install = "uv tool install --force --python python3.12 --with pip aider-chat@latest"
+remove = "uv tool uninstall aider-chat"
+purge = ["~/.aider", "~/.aider.conf.yml"]
+notes = """
+aider-chat needs Python below 3.13, so it runs on a Python 3.12 that uv downloads (Debian 13 \
+ships 3.13). This is the uv method from Aider's install page."""
+
+[[app]]
+id = "goose"
+name = "Goose CLI"
+category = "agents"
+summary = "Open-source, extensible AI agent from the Agentic AI Foundation (formerly Block)."
+homepage = "https://block.github.io/goose/docs/getting-started/installation"
+color = "#000000"
+badge = "G"
+scope = "user"
+method = "Goose install script, in ~/.local/bin"
+version = 'test -x "$HOME/.local/bin/goose" && "$HOME/.local/bin/goose" --version'
+latest = "github:aaif-goose/goose"
+install = '''
+need bzip2 "Install it with: sudo apt install bzip2"
+export CONFIGURE=false
+run_installer https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh
+'''
+update = '"$HOME/.local/bin/goose" update'
+remove = 'rm -f "$HOME/.local/bin/goose"'
+purge = ["~/.config/goose", "~/.local/share/goose", "~/.local/state/goose"]
+notes = "Run `goose configure` to pick a model provider."
+
+[[app]]
+id = "openclaw"
+name = "OpenClaw"
+category = "agents"
+summary = "Personal AI assistant that runs on your machine, with a gateway service."
+homepage = "https://docs.openclaw.ai/install"
+color = "#e8492f"
+badge = "Cw"
+scope = "system"
+method = "npm package openclaw"
+requires = ["nodejs"]
+version = "npm_version openclaw"
+latest = "npm:openclaw"
+install = '''
+node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>24||(a===24&&b>=16)?0:1)' \
+    || die "OpenClaw needs Node.js 24.16 or newer: update Node.js first."
+npm_global openclaw@latest --allow-scripts=openclaw
+'''
+remove_user = '''
+if have openclaw; then
+    if [ "${AC_PURGE:-0}" = 1 ]; then
+        openclaw uninstall --all --yes --non-interactive
+    else
+        openclaw uninstall --service --yes --non-interactive
+    fi
+fi
+'''
+remove = "npm_remove openclaw"
+purge = ["~/.openclaw"]
+notes = """
+After installing, run `openclaw onboard --install-daemon` in a terminal to set it up and start \
+its gateway (a systemd user service). Removing it first stops that service with \
+`openclaw uninstall`."""
+
+[[app]]
+id = "hermes-agent"
+name = "Hermes Agent"
+category = "agents"
+summary = "Nous Research's self-improving AI agent, with a gateway for chat apps."
+homepage = "https://hermes-agent.nousresearch.com/docs/getting-started/installation"
+logo = "hermes"
+color = "#7c3aed"
+badge = "H"
+scope = "user"
+method = "Hermes install script, in ~/.hermes"
+version = 'test -x "$HOME/.local/bin/hermes" && "$HOME/.local/bin/hermes" --version'
+latest = "pypi:hermes-agent"
+install = "run_installer https://hermes-agent.nousresearch.com/install.sh --non-interactive"
+update = '"$HOME/.local/bin/hermes" update'
+remove = '''
+if [ "${AC_PURGE:-0}" = 1 ]; then
+    "$HOME/.local/bin/hermes" uninstall --yes --full
+else
+    "$HOME/.local/bin/hermes" uninstall --yes
+fi
+'''
+purge = ["~/.hermes"]
+notes = """
+Installs its own uv and Python. Run `hermes setup` (or just `hermes`) to configure a model. \
+Removal uses `hermes uninstall`, which also stops the gateway service."""
+
+[[app]]
+id = "deepseek-harness"
+name = "DeepSeek Harness"
+category = "agents"
+summary = "DeepSeek's open-source agent harness (`dsh`), with a Web UI. Developer preview."
+homepage = "https://github.com/deepseek-ai/deepseek-harness"
+color = "#4d6bfe"
+badge = "DS"
+scope = "system"
+method = "npm package @deepseek-ai/dsh"
+requires = ["nodejs"]
+version = "npm_version @deepseek-ai/dsh"
+latest = "npm:@deepseek-ai/dsh"
+install = '''
+node -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>=24||(a===22&&b>=19)?0:1)' \
+    || die "DeepSeek Harness needs Node.js 22.19 or newer: update Node.js first."
+npm_global @deepseek-ai/dsh@latest
+'''
+remove = "npm_remove @deepseek-ai/dsh"
+purge = ["~/.dsh"]
+notes = """
+Developer preview: DeepSeek warns that new versions will break compatibility; read its safety \
+notice (SAFETY.md in the repository) first. Run `dsh web` in a project folder to open the Web UI \
+at http://127.0.0.1:3080, then add a DeepSeek API key in Settings > Models. Settings, keys and \
+sessions are kept in ~/.dsh. DeepSeek publishes no Linux desktop app."""

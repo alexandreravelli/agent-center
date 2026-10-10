@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Agent Center
+GenericName=App Center
+Comment=Install, update and remove AI coding tools, browsers and editors
+Exec=agent-center
+Icon=agent-center
+Terminal=false
+Categories=System;PackageManager;Development;
+Keywords=install;update;uninstall;apps;ai;agents;claude;codex;
+StartupNotify=true

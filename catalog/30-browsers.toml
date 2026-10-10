@@ -1,0 +1,229 @@
+# Web browsers.
+
+[[app]]
+id = "firefox"
+name = "Firefox"
+category = "browsers"
+summary = "Mozilla's browser, the latest release instead of Debian's ESR."
+homepage = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
+icon = "firefox"
+color = "#ff7139"
+badge = "Fx"
+scope = "system"
+method = "Mozilla APT repository"
+version = "deb_version firefox"
+latest = "cmd:curl -fsSL https://product-details.mozilla.org/1.0/firefox_versions.json | grep -o '\"LATEST_FIREFOX_VERSION\": *\"[^\"]*\"'"
+install = '''
+apt_key https://packages.mozilla.org/apt/repo-signing-key.gpg /etc/apt/keyrings/packages.mozilla.org.asc
+cat > /etc/apt/sources.list.d/mozilla.sources <<'EOF'
+Types: deb
+URIs: https://packages.mozilla.org/apt
+Suites: mozilla
+Components: main
+Signed-By: /etc/apt/keyrings/packages.mozilla.org.asc
+EOF
+cat > /etc/apt/preferences.d/mozilla <<'EOF'
+Package: *
+Pin: origin packages.mozilla.org
+Pin-Priority: 1000
+EOF
+apt_install firefox
+'''
+update = "apt_upgrade firefox"
+remove = '''
+apt_purge firefox
+drop /etc/apt/sources.list.d/mozilla.sources /etc/apt/preferences.d/mozilla /etc/apt/keyrings/packages.mozilla.org.asc
+'''
+purge = ["~/.mozilla/firefox", "~/.cache/mozilla/firefox"]
+notes = """
+Mozilla's .deb, with the pin Mozilla documents so its packages win over Debian's. Debian's \
+firefox-esr stays installed next to it; remove it with apt if you no longer want it."""
+
+[[app]]
+id = "librewolf"
+name = "LibreWolf"
+category = "browsers"
+summary = "Firefox fork focused on privacy and security, with uBlock Origin and no telemetry."
+homepage = "https://librewolf.net/installation/debian/"
+color = "#00acff"
+badge = "Lw"
+scope = "system"
+method = "LibreWolf APT repository (through extrepo)"
+version = "deb_version librewolf"
+latest = "cmd:repo_version https://repo.librewolf.net/dists/librewolf/main/binary-amd64 librewolf"
+install = '''
+apt_install extrepo
+log "extrepo enable librewolf"
+extrepo enable librewolf
+extrepo update librewolf
+apt_install librewolf
+'''
+update = "apt_upgrade librewolf"
+remove = '''
+apt_purge librewolf
+# The extrepo files, and those of the older manual setup if present.
+drop /etc/apt/sources.list.d/extrepo_librewolf.sources /var/lib/extrepo/keys/librewolf.asc \
+    /etc/apt/sources.list.d/librewolf.sources /etc/apt/sources.list.d/librewolf.list \
+    /etc/apt/keyrings/librewolf.gpg /etc/apt/trusted.gpg.d/librewolf.gpg /etc/apt/preferences.d/librewolf.pref
+'''
+purge = ["~/.librewolf", "~/.config/librewolf", "~/.cache/librewolf"]
+notes = """
+Installed the way LibreWolf documents for Debian: extrepo adds its signed repository, then apt \
+keeps it up to date (LibreWolf has no updater of its own). The extrepo tool stays installed."""
+
+[[app]]
+id = "zen-browser"
+name = "Zen Browser"
+category = "browsers"
+summary = "Calm, Firefox-based browser with vertical tabs, workspaces and split view."
+homepage = "https://docs.zen-browser.app/guides/install-linux"
+color = "#1c1c1c"
+badge = "Zn"
+scope = "user"
+method = "Zen install script, in ~/.tarball-installations/zen"
+version = '''
+f="$HOME/.tarball-installations/zen/application.ini"
+[ -f "$f" ] && sed -n 's/^Version=//p' "$f" | head -n 1
+'''
+latest = "cmd:curl -fsSL https://raw.githubusercontent.com/zen-browser/updates-server/HEAD/updates/browser/Linux_x86_64-gcc3/release/update.xml | grep -o 'displayVersion=\"[^\"]*\"' | head -n 1"
+install = "run_installer https://github.com/zen-browser/updates-server/raw/refs/heads/main/install.sh"
+remove = '''
+log "Removing ~/.tarball-installations/zen"
+rm -rf "$HOME/.tarball-installations/zen"
+rm -f "$HOME/.local/bin/zen" "$HOME/.local/share/applications/zen.desktop"
+rmdir "$HOME/.tarball-installations" 2>/dev/null || true
+'''
+purge = ["~/.zen", "~/.config/zen", "~/.cache/zen"]
+notes = """
+Uses Zen's own tarball script, the documented choice besides Flatpak and AppImage. Zen updates \
+itself; updating here runs the script again, which keeps your profile."""
+
+[[app]]
+id = "helium"
+name = "Helium"
+category = "browsers"
+summary = "Private, fast Chromium-based browser with uBlock Origin built in."
+homepage = "https://github.com/imputnet/helium-linux"
+icon = "helium"
+color = "#2b2b2b"
+badge = "He"
+scope = "system"
+method = "Helium APT repository"
+version = "deb_version helium-bin"
+latest = "cmd:repo_version https://pkg.helium.computer/deb/dists/stable/main/binary-amd64 helium-bin"
+install = '''
+apt_key https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc /usr/share/keyrings/helium.gpg
+echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main" \
+    > /etc/apt/sources.list.d/helium.list
+apt_install helium-bin
+'''
+update = "apt_upgrade helium-bin"
+remove = '''
+apt_purge helium-bin
+drop /etc/apt/sources.list.d/helium.list /usr/share/keyrings/helium.gpg
+'''
+purge = ["~/.config/net.imput.helium", "~/.cache/net.imput.helium"]
+
+[[app]]
+id = "chromium"
+name = "Chromium"
+category = "browsers"
+summary = "The open-source browser behind Chrome, packaged by Debian."
+homepage = "https://packages.debian.org/trixie/chromium"
+icon = "chromium"
+color = "#4c8bf5"
+badge = "Cr"
+scope = "system"
+method = "Debian package"
+version = "deb_version chromium"
+latest = "apt:chromium"
+install = "apt_install chromium"
+update = "apt_upgrade chromium"
+remove = "apt_purge chromium"
+purge = ["~/.config/chromium", "~/.cache/chromium"]
+notes = "Updated with Debian's security updates."
+
+[[app]]
+id = "google-chrome"
+name = "Google Chrome"
+category = "browsers"
+summary = "Google's browser."
+homepage = "https://www.google.com/chrome/"
+icon = "google-chrome"
+color = "#1a73e8"
+badge = "Ch"
+scope = "system"
+method = "Google .deb (adds Google's APT repository)"
+version = "deb_version google-chrome-stable"
+latest = "cmd:curl -fsSL https://versionhistory.googleapis.com/v1/chrome/platforms/linux/channels/stable/versions | grep -o '\"version\": *\"[^\"]*\"' | head -n 1"
+install = '''
+[ "$ARCH" = amd64 ] || die "Google Chrome for Linux is built for amd64 only"
+deb_from_url https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+'''
+update = "apt_upgrade google-chrome-stable"
+remove = '''
+apt_purge google-chrome-stable
+drop /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+'''
+purge = ["~/.config/google-chrome", "~/.cache/google-chrome"]
+notes = "The package sets up Google's APT repository itself, so updates come through apt."
+
+[[app]]
+id = "brave"
+name = "Brave"
+category = "browsers"
+summary = "Privacy-focused Chromium-based browser that blocks ads and trackers."
+homepage = "https://brave.com/linux/"
+icon = "brave-browser"
+color = "#fb542b"
+badge = "B"
+scope = "system"
+method = "Brave APT repository"
+version = "deb_version brave-browser"
+latest = "cmd:repo_version https://brave-browser-apt-release.s3.brave.com/dists/stable/main/binary-amd64 brave-browser"
+install = '''
+apt_key https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg /usr/share/keyrings/brave-browser-archive-keyring.gpg
+log "Adding /etc/apt/sources.list.d/brave-browser-release.sources"
+src=$(download https://brave-browser-apt-release.s3.brave.com/brave-browser.sources)
+install -m 0644 "$src" /etc/apt/sources.list.d/brave-browser-release.sources
+apt_install brave-browser
+'''
+update = "apt_upgrade brave-browser"
+remove = '''
+apt_purge brave-browser
+drop /etc/apt/sources.list.d/brave-browser-release.sources /usr/share/keyrings/brave-browser-archive-keyring.gpg
+'''
+purge = ["~/.config/BraveSoftware", "~/.cache/BraveSoftware"]
+
+[[app]]
+id = "vivaldi"
+name = "Vivaldi"
+category = "browsers"
+summary = "Highly customizable Chromium-based browser with built-in mail, calendar and feed reader."
+homepage = "https://help.vivaldi.com/desktop/install-update/manual-setup-vivaldi-linux-repositories/"
+color = "#ef3939"
+badge = "V"
+scope = "system"
+method = "Vivaldi .deb (adds Vivaldi's APT repository)"
+version = "deb_version vivaldi-stable"
+latest = "cmd:curl -fsSL https://vivaldi.com/download/ | grep -o 'vivaldi-stable_[0-9][0-9.]*' | head -n 1"
+install = '''
+case "$ARCH" in amd64|arm64) ;; *) die "Vivaldi publishes .deb packages for amd64 and arm64";; esac
+url=$(curl -fsSL https://vivaldi.com/download/ \
+    | grep -o "https://downloads.vivaldi.com/stable/vivaldi-stable_[0-9.]*-[0-9]*_$ARCH\.deb" | head -n 1)
+[ -n "$url" ] || die "cannot find the Vivaldi .deb on https://vivaldi.com/download/"
+deb_from_url "$url"
+'''
+update = "apt_upgrade vivaldi-stable"
+remove = '''
+apt_purge vivaldi-stable
+# The repository and key the package configured, if its removal left them behind.
+for f in /etc/apt/sources.list.d/vivaldi* /etc/apt/trusted.gpg.d/vivaldi*; do
+    [ -e "$f" ] && drop "$f"
+done
+true
+'''
+purge = ["~/.config/vivaldi", "~/.cache/vivaldi"]
+notes = """
+Installs the .deb from vivaldi.com, which sets up Vivaldi's signed repository so updates come \
+through apt, as Vivaldi documents."""
