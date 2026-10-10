@@ -119,11 +119,13 @@ pub struct App {
     /// Shown in the details window.
     #[serde(default)]
     pub notes: String,
-    /// What the Open button starts once the app is installed: a desktop entry
-    /// (`firefox.desktop`) for apps with a window, or a command run in a terminal (`claude`) for
-    /// command-line tools. Empty: no Open button.
+    /// For apps with a window: their desktop entries (`firefox.desktop`). The Open button starts
+    /// the first one found, like the applications menu does.
     #[serde(default)]
-    pub open: String,
+    pub desktop: Vec<String>,
+    /// For command-line tools: the command the Open button runs in a terminal (`claude`).
+    #[serde(default)]
+    pub command: String,
 }
 
 impl App {
@@ -304,8 +306,8 @@ mod tests {
             for p in &app.purge {
                 assert!(p.starts_with("~/") && !p.contains(".."), "{}: purge path {p} must be in ~/", app.id);
             }
-            if app.open.ends_with(".desktop") {
-                assert!(!app.open.contains('/'), "{}: open names a desktop file ID, not a path", app.id);
+            for d in &app.desktop {
+                assert!(d.ends_with(".desktop") && !d.contains('/'), "{}: {d} is not a desktop file ID", app.id);
             }
         }
     }

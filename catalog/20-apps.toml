@@ -12,6 +12,7 @@ color = "#d97757"
 badge = "Cl"
 scope = "system"
 method = "Anthropic APT repository"
+desktop = ["com.anthropic.Claude.desktop"]
 version = "deb_version claude-desktop"
 latest = "cmd:repo_version https://downloads.claude.ai/claude-desktop/apt/stable/dists/stable/main/binary-amd64 claude-desktop"
 install = '''
@@ -42,6 +43,7 @@ color = "#10a37f"
 badge = "Gp"
 scope = "system"
 method = "OpenAI .deb (adds OpenAI's APT repository)"
+desktop = ["chatgpt.desktop"]
 version = "deb_version chatgpt"
 latest = "apt:chatgpt"
 install = '''
@@ -72,6 +74,7 @@ color = "#a855f7"
 badge = "T3"
 scope = "system"
 method = ".deb from GitHub releases"
+desktop = ["t3code.desktop"]
 version = 'deb_version "$(deb_of t3-code)"'
 latest = "github:pingdotgg/t3code"
 install = '''
@@ -96,6 +99,7 @@ color = "#211e1e"
 badge = "oc"
 scope = "system"
 method = ".deb from opencode.ai"
+desktop = ["ai.opencode.desktop.desktop", "opencode-desktop.desktop"]
 version = 'deb_version "$(deb_of opencode-desktop)"'
 latest = "github:anomalyco/opencode"
 install = '''
@@ -117,6 +121,7 @@ color = "#7c3aed"
 badge = "H"
 scope = "user"
 method = "built locally by Hermes Agent"
+desktop = ["com.nousresearch.hermes.desktop", "hermes.desktop"]
 requires = ["hermes-agent", "nodejs"]
 version = '''
 [ -f "${HERMES_HOME:-$HOME/.hermes}/desktop-build-stamp.json" ] && "$HOME/.local/bin/hermes" --version
@@ -127,9 +132,8 @@ update = '"$HOME/.local/bin/hermes" update'
 remove = '"$HOME/.local/bin/hermes" uninstall --gui --yes'
 notes = """
 Nous Research does not publish a Linux package: `hermes desktop --build-only` builds the \
-Electron app from the Hermes Agent sources (a few minutes, needs Node.js). Start it once with \
-`hermes desktop --skip-build`: that adds Hermes to the applications menu. `hermes update` \
-updates the agent and rebuilds the app. Removing it keeps the agent, your config and chats."""
+Electron app from the Hermes Agent sources (a few minutes, needs Node.js) and adds it to the \
+applications menu. `hermes update` updates the agent and rebuilds the app. Removing it keeps the agent, your config and chats."""
 
 [[app]]
 id = "openclaw-desktop"
@@ -143,6 +147,7 @@ color = "#e8492f"
 badge = "Cw"
 scope = "system"
 method = ".deb from GitHub releases"
+desktop = ["OpenClaw.desktop"]
 requires = ["openclaw"]
 version = 'deb_version "$(deb_of openclaw-desktop)"'
 latest = "github:openclaw/openclaw"
@@ -165,6 +170,7 @@ color = "#000000"
 badge = "G"
 scope = "system"
 method = ".deb from GitHub releases"
+desktop = ["goose.desktop"]
 version = 'deb_version "$(deb_of goose-desktop)"'
 latest = "github:aaif-goose/goose"
 install = '''

@@ -380,10 +380,10 @@ impl Ui {
         let spinner = gtk::Spinner::new();
         let primary = gtk::Button::with_label("Install");
         let open = gtk::Button::with_label("Open");
-        open.set_tooltip_text(Some(&if app.open.ends_with(".desktop") {
+        open.set_tooltip_text(Some(&if app.command.is_empty() {
             format!("Start {}", app.name)
         } else {
-            format!("Run `{}` in a terminal", app.open)
+            format!("Run {} in a terminal", app.command)
         }));
         let remove = gtk::Button::with_label("Remove");
         let info = gtk::Button::with_label("Details");
@@ -825,6 +825,11 @@ impl Ui {
         if !app.purge.is_empty() {
             rows.push(("Settings and data", app.purge.join("  ")));
         }
+        if !app.command.is_empty() {
+            rows.push(("Command", app.command.clone()));
+        } else if !app.desktop.is_empty() {
+            rows.push(("Desktop entry", app.desktop.join(", ")));
+        }
         for (n, (k, v)) in rows.iter().enumerate() {
             let key = gtk::Label::builder().label(*k).xalign(0.0).build();
             key.style_context().add_class("dim-label");
@@ -874,13 +879,10 @@ impl Ui {
     }
 }
 
-/// True when the Open button can start the app: it names a command, or a desktop entry that exists.
+/// True when the Open button can start the app: it has a command, or one of its desktop entries
+/// exists.
 fn can_open(app: &App) -> bool {
-    match app.open.as_str() {
-        "" => false,
-        id if id.ends_with(".desktop") => desktop_entry(id).is_some(),
-        _ => true,
-    }
+    !app.command.is_empty() || app.desktop.iter().any(|id| desktop_entry(id).is_some())
 }
 
 /// The file of the desktop entry `id` ("firefox.desktop"), in ~/.local/share/applications or a
@@ -892,14 +894,18 @@ fn desktop_entry(id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Starts the app the way its Open button says: its desktop entry, or its command in a terminal.
+/// Starts the app: its command in a terminal, or its first desktop entry found.
 fn launch(app: &App) -> Result<(), String> {
-    let open = app.open.as_str();
-    if open.ends_with(".desktop") {
+    if app.command.is_empty() {
+        let id = app
+            .desktop
+            .iter()
+            .find(|id| desktop_entry(id).is_some())
+            .ok_or_else(|| format!("no desktop entry for {}", app.name))?;
         let info = gio::AppInfo::all()
             .into_iter()
-            .find(|a| a.id().as_deref() == Some(open))
-            .ok_or_else(|| format!("{open} is not installed"))?;
+            .find(|a| a.id().as_deref() == Some(id.as_str()))
+            .ok_or_else(|| format!("{id} cannot be started"))?;
         let ctx = gtk::gdk::Display::default().and_then(|d| d.app_launch_context());
         return info.launch(&[], ctx.as_ref()).map_err(|e| e.to_string());
     }
@@ -909,7 +915,7 @@ fn launch(app: &App) -> Result<(), String> {
         .ok()
         .filter(|s| s.starts_with('/') && !s.contains('\''))
         .unwrap_or_else(|| "/bin/bash".into());
-    let script = format!("{open}; exec '{shell}'");
+    let script = format!("{}; exec '{shell}'", app.command);
     let home = crate::catalog::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     // x-terminal-emulator is Debian's default terminal (xfce4-terminal on XFCE).
     for (terminal, flag) in [("x-terminal-emulator", "-e"), ("xfce4-terminal", "-x"), ("gnome-terminal", "--")] {

@@ -188,6 +188,11 @@ fn info(args: &[String]) -> i32 {
     if !app.purge.is_empty() {
         println!("Data:      {}", app.purge.join(" "));
     }
+    if !app.command.is_empty() {
+        println!("Command:   {}", app.command);
+    } else if !app.desktop.is_empty() {
+        println!("Starts:    {}", app.desktop.join(", "));
+    }
     if !app.notes.is_empty() {
         println!("\n{}", app.notes.trim());
     }
