@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/alexandreravelli/agent-center/compare/v0.3.0...v0.4.0) - 2026-10-11
+
+### Added
+
+- *(apt)* carry Dockling and Tileling in the APT repository
+
+### Documentation
+
+- *(readme)* the APT repository also carries Dockling and Tileling
+
 ## [0.3.0](https://github.com/alexandreravelli/agent-center/compare/v0.2.1...v0.3.0) - 2026-10-11
 
 ### Added
