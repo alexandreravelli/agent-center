@@ -11,31 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- *(cli)* add shell completion for bash, zsh and fish
-- *(cli)* color the terminal output
-- *(cli)* add --json to list and info
-- *(cli)* add --dry-run to install, update and remove
-- *(cli)* suggest close names and refuse unknown options
+- Shell completion for bash, zsh and fish, installed by the package. `agent-center completions <shell>` prints the script, and `list --ids` prints the app ids.
+- `--dry-run` for `install`, `update` and `remove`: shows every script that would run, in order, as root or as you, and runs nothing.
+- `--json` for `list` and `info`, for scripts and provisioning tools.
+- Colored output in a terminal: installed versions, available updates, steps and errors. Off when the output is piped, with `NO_COLOR` or with `TERM=dumb`.
+- Suggestions for mistyped apps, commands and options: `install claude` answers *Did you mean claude-code or claude-desktop?*
 
 ### Changed
 
-- typed errors in the library, anyhow in the binary
-- move the catalog, version and runner logic into a library
-
-### Documentation
-
-- *(readme)* document the new command-line options and how to contribute
-- add CONTRIBUTING.md and SECURITY.md
-- use the Keep a Changelog format
-- document the library API with tested examples
+- Unknown options are refused with exit code 2 instead of being ignored (`list --instaled` listed every app), and `info` takes one app.
+- Clearer error messages; the catalog, version and script logic is now a documented library inside the package.
+- Each release runs every check (tests, Clippy, MSRV, cargo-deny) before the package is built and published.
 
 ### Fixed
 
-- *(runner)* strip every escape sequence from script output
-- *(runner)* stop at requirement cycles
-- *(runner)* tell a refused authentication from a failed script
-- *(runner)* run root scripts in a fixed environment
-- *(versions)* pass the GitHub token to curl through stdin
+- A cancelled password dialog or a refused `sudo` says "authentication failed or was cancelled" instead of an exit status.
+- Two apps that require each other are queued once instead of over and over.
+- Colored installer output no longer leaves stray characters (from `tput sgr0`) in the log.
+
+### Security
+
+- The `GITHUB_TOKEN` used for version checks is passed to curl through its standard input: on the command line, other local users could read it in the process list.
+- Scripts that run as root get a fixed `PATH` and `HOME`, whatever environment sudo was configured to keep, so a directory the user can write to never comes first in root's `PATH`.
 
 ## [0.2.1](https://github.com/alexandreravelli/agent-center/compare/v0.2.0...v0.2.1) - 2026-10-10
 
