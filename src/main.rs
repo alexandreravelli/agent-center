@@ -24,6 +24,7 @@ Without a command, opens the Agent Center window (on the Updates page with --upd
 Commands:
   list [--installed] [--updates]    List the apps (with the latest versions for --updates)
   info <app>                        Show an app and the scripts Agent Center runs for it
+                                    (list and info take --json: print JSON for scripts)
   install <app>...                  Install apps (and what they need)
   update [<app>...]                 Update apps; without names, every app with an update
   remove [--purge] <app>...         Remove apps; --purge also deletes their settings and data
@@ -158,7 +159,7 @@ fn dispatch(args: &[String]) -> Result<ExitCode> {
             notify(rest)
         }
         Some("run-system") => Ok(exit_code(runner::run_system(rest))),
-        Some("list") => Ok(list(&Args::parse("list", rest, &["--installed", "--updates"])?)),
+        Some("list") => list(&Args::parse("list", rest, &["--installed", "--updates", "--json"])?),
         Some("categories") => {
             Args::parse("categories", rest, &[])?;
             let cat = load();
@@ -236,7 +237,7 @@ fn par_map<T: Send>(apps: &[&App], f: impl Fn(&App) -> T + Sync) -> Vec<T> {
     })
 }
 
-fn list(args: &Args) -> ExitCode {
+fn list(args: &Args) -> Result<ExitCode> {
     let cat = load();
     let installed_only = args.has("--installed");
     let updates = args.has("--updates");
@@ -254,14 +255,38 @@ fn list(args: &Args) -> ExitCode {
     } else {
         vec![None; apps.len()]
     };
-    for c in &cat.categories {
-        let rows: Vec<usize> = (0..apps.len())
-            .filter(|&i| apps[i].category == c.id)
+    let update = |i: usize| matches!((&installed[i], &latest[i]), (Some(a), Some(b)) if versions::is_newer(a, b));
+    let rows = |category: &str| -> Vec<usize> {
+        (0..apps.len())
+            .filter(|&i| apps[i].category == category)
             .filter(|&i| !installed_only || installed[i].is_some())
-            .filter(|&i| {
-                !updates || matches!((&installed[i], &latest[i]), (Some(a), Some(b)) if versions::is_newer(a, b))
+            .filter(|&i| !updates || update(i))
+            .collect()
+    };
+    if args.has("--json") {
+        let list: Vec<serde_json::Value> = cat
+            .categories
+            .iter()
+            .flat_map(|c| rows(&c.id))
+            .map(|i| {
+                let a = apps[i];
+                serde_json::json!({
+                    "id": a.id,
+                    "name": a.name,
+                    "category": a.category,
+                    "summary": a.summary,
+                    "scope": scope_name(a.scope),
+                    "installed": installed[i],
+                    "latest": latest[i],
+                    "update": update(i),
+                })
             })
             .collect();
+        println!("{}", serde_json::to_string_pretty(&list)?);
+        return Ok(ExitCode::SUCCESS);
+    }
+    for c in &cat.categories {
+        let rows = rows(&c.id);
         if rows.is_empty() {
             continue;
         }
@@ -276,7 +301,15 @@ fn list(args: &Args) -> ExitCode {
             println!("  {:<18} {:<22} {:<20} {}", a.id, a.name, state, a.summary);
         }
     }
-    ExitCode::SUCCESS
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The value of `scope` in the catalog.
+fn scope_name(scope: Scope) -> &'static str {
+    match scope {
+        Scope::System => "system",
+        Scope::User => "user",
+    }
 }
 
 /// The catalog app with this id, or a usage error that suggests close ids.
@@ -288,13 +321,43 @@ fn find<'a>(cat: &'a Catalog, id: &str) -> Result<&'a App, Usage> {
 }
 
 fn info(args: &[String]) -> Result<ExitCode> {
-    let args = Args::parse("info", args, &[])?;
+    let args = Args::parse("info", args, &["--json"])?;
     let cat = load();
     let app = match args.names[..] {
         [id] => find(&cat, id)?,
         [] => return Err(Usage("name an app. See `agent-center list`.".into()).into()),
         _ => return Err(Usage("info shows one app at a time.".into()).into()),
     };
+    if args.has("--json") {
+        let latest = (!app.latest.is_empty()).then(|| versions::latest(app));
+        let info = serde_json::json!({
+            "id": app.id,
+            "name": app.name,
+            "summary": app.summary,
+            "category": app.category,
+            "category_name": cat.category_name(&app.category),
+            "homepage": app.homepage,
+            "method": app.method,
+            "scope": scope_name(app.scope),
+            "installed": versions::installed(app),
+            "latest": latest.as_ref().and_then(|l| l.as_ref().ok()),
+            "latest_error": latest.as_ref().and_then(|l| l.as_ref().err()).map(ToString::to_string),
+            "requires": app.requires,
+            "purge": app.purge,
+            "command": app.command,
+            "desktop": app.desktop,
+            "notes": app.notes.trim(),
+            "scripts": {
+                "install": app.install,
+                "update": app.script(Action::Update),
+                "remove_user": app.remove_user,
+                "remove": app.remove,
+                "version": app.version,
+            },
+        });
+        println!("{}", serde_json::to_string_pretty(&info)?);
+        return Ok(ExitCode::SUCCESS);
+    }
     println!("{} ({})", app.name, app.id);
     println!("{}", app.summary);
     println!("Category:  {}", cat.category_name(&app.category));

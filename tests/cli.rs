@@ -150,6 +150,30 @@ fn dry_run_shows_the_scripts_and_runs_nothing() {
 }
 
 #[test]
+fn json_output() {
+    let sb = Sandbox::new();
+    sb.run("install base").ok();
+    let list: serde_json::Value = serde_json::from_str(&sb.run("list --json").ok()).unwrap();
+    assert_eq!(list.as_array().map(Vec::len), Some(2));
+    assert_eq!(list[0]["id"], "hello");
+    assert_eq!(list[0]["installed"], serde_json::Value::Null);
+    assert_eq!(list[1]["installed"], "0.1.0");
+    assert_eq!(list[1]["scope"], "user");
+
+    sb.run("install hello").ok();
+    let updates: serde_json::Value = serde_json::from_str(&sb.run("list --updates --json").ok()).unwrap();
+    assert_eq!(updates.as_array().map(Vec::len), Some(1));
+    assert_eq!((&updates[0]["latest"], &updates[0]["update"]), (&"2.0.0".into(), &true.into()));
+
+    let info: serde_json::Value = serde_json::from_str(&sb.run("info hello --json").ok()).unwrap();
+    assert_eq!(info["installed"], "1.0.0");
+    assert_eq!(info["latest"], "2.0.0");
+    assert_eq!(info["latest_error"], serde_json::Value::Null);
+    assert_eq!(info["requires"], serde_json::json!(["base"]));
+    assert!(info["scripts"]["update"].as_str().is_some_and(|s| s.starts_with("echo 2.0.0")));
+}
+
+#[test]
 fn a_failing_script_stops_the_job() {
     let sb = Sandbox::new();
     std::fs::remove_dir_all(sb.dir.path().join("state")).unwrap();
