@@ -2,8 +2,8 @@
 //! installed apps for updates a few minutes after login, then once a day, and shows a desktop
 //! notification when new versions are out. Clicking it opens Agent Center on the Updates page.
 
-use crate::catalog::{App, Catalog};
-use crate::versions;
+use agent_center::catalog::{self, App, Catalog};
+use agent_center::versions;
 use gtk::gio;
 use gtk::glib::{self, VariantTy};
 use gtk::prelude::*;
@@ -178,7 +178,7 @@ fn state_file() -> PathBuf {
     let dir = std::env::var_os("XDG_STATE_HOME")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| crate::catalog::home_dir().map(|h| h.join(".local/state")))
+        .or_else(|| catalog::home_dir().map(|h| h.join(".local/state")))
         .unwrap_or_else(std::env::temp_dir);
     dir.join("agent-center/announced")
 }

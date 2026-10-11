@@ -1,8 +1,8 @@
 //! The Agent Center window (GTK 3).
 
-use crate::catalog::{Action, App, Catalog};
-use crate::runner::{self, Step};
-use crate::versions;
+use agent_center::catalog::{self, Action, App, Catalog};
+use agent_center::runner::{self, Step};
+use agent_center::versions;
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::prelude::*;
 use gtk::{cairo, gio, glib, pango};
@@ -702,7 +702,7 @@ impl Ui {
         let steps = {
             let entries = self.entries.borrow();
             let cat = &self.cat;
-            crate::with_requirements(cat, steps, &|a: &App| {
+            runner::with_requirements(cat, steps, &|a: &App| {
                 cat.apps.iter().position(|x| x.id == a.id).is_some_and(|i| entries[i].installed.is_some())
             })
         };
@@ -770,7 +770,7 @@ impl Ui {
             gtk::ButtonsType::None,
             &format!("Remove {}?", app.name),
         );
-        dialog.set_secondary_text(Some(&format!("Installed as: {} ({}).", app.method, crate::scope_name(app))));
+        dialog.set_secondary_text(Some(&format!("Installed as: {} ({}).", app.method, app.scope.description())));
         let purge = gtk::CheckButton::with_label("Also delete its settings and data");
         let paths: Vec<String> = app.purge_paths().iter().map(|p| p.display().to_string()).collect();
         if !paths.is_empty()
@@ -818,7 +818,7 @@ impl Ui {
         if let Some(l) = &e.latest {
             rows.push(("Latest", l.clone()));
         }
-        rows.push(("Method", format!("{} ({})", app.method, crate::scope_name(app))));
+        rows.push(("Method", format!("{} ({})", app.method, app.scope.description())));
         if !app.requires.is_empty() {
             rows.push(("Requires", app.requires.join(", ")));
         }
@@ -916,7 +916,7 @@ fn launch(app: &App) -> Result<(), String> {
         .filter(|s| s.starts_with('/') && !s.contains('\''))
         .unwrap_or_else(|| "/bin/bash".into());
     let script = format!("{}; exec '{shell}'", app.command);
-    let home = crate::catalog::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let home = catalog::home_dir().unwrap_or_else(|| PathBuf::from("/"));
     // x-terminal-emulator is Debian's default terminal (xfce4-terminal on XFCE).
     for (terminal, flag) in [("x-terminal-emulator", "-e"), ("xfce4-terminal", "-x"), ("gnome-terminal", "--")] {
         let child = Command::new(terminal)

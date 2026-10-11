@@ -26,6 +26,16 @@ pub enum Scope {
     User,
 }
 
+impl Scope {
+    /// Where the app lives and what that needs, in words.
+    pub fn description(self) -> &'static str {
+        match self {
+            Scope::System => "system-wide, needs administrator rights",
+            Scope::User => "in your home directory",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Install,
