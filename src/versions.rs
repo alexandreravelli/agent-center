@@ -3,8 +3,43 @@
 use crate::catalog::App;
 use crate::runner;
 use std::cmp::Ordering;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::io::{self, Write};
+use std::process::{Command, ExitStatus, Stdio};
+
+/// Why the latest version of an app could not be found.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum LatestError {
+    /// The app has no `latest` source.
+    #[error("no source for the latest version")]
+    NoSource,
+    /// The `latest` source is not `npm:`, `github:`, `pypi:`, `apt:` or `cmd:`.
+    #[error("unknown source {0:?}")]
+    UnknownSource(String),
+    /// A program (curl, apt-cache, sh) could not be run.
+    #[error("cannot run {program}: {error}")]
+    Spawn {
+        /// The program.
+        program: &'static str,
+        /// Why it could not run.
+        error: io::Error,
+    },
+    /// The download failed; curl's message.
+    #[error("{0}")]
+    Download(String),
+    /// The registry's answer is not what was expected.
+    #[error("unexpected answer: {0}")]
+    Answer(String),
+    /// The package is not in the package lists of the last `apt-get update`.
+    #[error("not in the APT package lists")]
+    NotInAptLists,
+    /// The `cmd:` command failed.
+    #[error("version command failed ({0})")]
+    Command(ExitStatus),
+    /// The source answered without a version number.
+    #[error("no version in {0:?}")]
+    NoVersion(String),
+}
 
 /// The installed version, or `None` when the app is not installed.
 pub fn installed(app: &App) -> Option<String> {
@@ -22,9 +57,14 @@ pub fn installed(app: &App) -> Option<String> {
 }
 
 /// The latest available version, from the app's `latest` source.
-pub fn latest(app: &App) -> Result<String, String> {
+///
+/// # Errors
+///
+/// Returns a [`LatestError`] when the app has no source, the source cannot be reached, or its
+/// answer holds no version number.
+pub fn latest(app: &App) -> Result<String, LatestError> {
     let src = app.latest.trim();
-    let (kind, arg) = src.split_once(':').ok_or("no source")?;
+    let (kind, arg) = src.split_once(':').ok_or(LatestError::NoSource)?;
     let arg = arg.trim();
     let text = match kind {
         "npm" => json_field(&format!("https://registry.npmjs.org/{arg}/latest"), &["version"])?,
@@ -33,15 +73,15 @@ pub fn latest(app: &App) -> Result<String, String> {
         "apt" => apt_candidate(arg)?,
         "cmd" => {
             let out = runner::user_command(arg).stdin(Stdio::null()).stderr(Stdio::null()).output();
-            let out = out.map_err(|e| e.to_string())?;
+            let out = out.map_err(|error| LatestError::Spawn { program: "sh", error })?;
             if !out.status.success() {
-                return Err("version command failed".into());
+                return Err(LatestError::Command(out.status));
             }
             String::from_utf8_lossy(&out.stdout).into_owned()
         }
-        _ => return Err(format!("unknown source {kind}")),
+        _ => return Err(LatestError::UnknownSource(kind.to_string())),
     };
-    extract(&text).ok_or_else(|| format!("no version in {:?}", text.trim()))
+    extract(&text).ok_or_else(|| LatestError::NoVersion(text.trim().to_string()))
 }
 
 /// The GitHub token from the environment, if any. Optional: it raises GitHub's limit of 60
@@ -67,47 +107,48 @@ fn curl(url: &str, token: Option<&str>) -> (Command, Option<String>) {
     (cmd, stdin)
 }
 
-fn fetch(url: &str) -> Result<String, String> {
+fn fetch(url: &str) -> Result<String, LatestError> {
+    let spawn = |error| LatestError::Spawn { program: "curl", error };
     let (mut cmd, headers) = curl(url, github_token().as_deref());
     cmd.stdin(if headers.is_some() { Stdio::piped() } else { Stdio::null() });
-    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("curl: {e}"))?;
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(spawn)?;
     if let (Some(headers), Some(mut stdin)) = (headers, child.stdin.take()) {
         // Dropping `stdin` closes the pipe, so curl stops reading headers.
-        stdin.write_all(headers.as_bytes()).map_err(|e| format!("curl: {e}"))?;
+        stdin.write_all(headers.as_bytes()).map_err(spawn)?;
     }
-    let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
+    let out = child.wait_with_output().map_err(spawn)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(err.trim().trim_start_matches("curl: ").to_string());
+        return Err(LatestError::Download(err.trim().trim_start_matches("curl: ").to_string()));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-fn json_field(url: &str, path: &[&str]) -> Result<String, String> {
+fn json_field(url: &str, path: &[&str]) -> Result<String, LatestError> {
     let body = fetch(url)?;
-    let mut v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let mut v: serde_json::Value = serde_json::from_str(&body).map_err(|e| LatestError::Answer(e.to_string()))?;
     for key in path {
-        v = v.get(key).cloned().ok_or_else(|| format!("no \"{key}\" in the answer"))?;
+        v = v.get(key).cloned().ok_or_else(|| LatestError::Answer(format!("no \"{key}\" field")))?;
     }
-    v.as_str().map(String::from).ok_or_else(|| "not a string".into())
+    v.as_str().map(String::from).ok_or_else(|| LatestError::Answer("the version is not a string".into()))
 }
 
 /// The version APT would install, from the package lists of the last `apt-get update`.
-fn apt_candidate(pkg: &str) -> Result<String, String> {
+fn apt_candidate(pkg: &str) -> Result<String, LatestError> {
     let out = Command::new("apt-cache")
         .args(["policy", "--", pkg])
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| LatestError::Spawn { program: "apt-cache", error })?;
     let text = String::from_utf8_lossy(&out.stdout);
     let cand = text
         .lines()
         .find_map(|l| l.trim().strip_prefix("Candidate:"))
         .map(str::trim)
         .filter(|c| !c.is_empty() && *c != "(none)")
-        .ok_or("not in the APT package lists")?;
+        .ok_or(LatestError::NotInAptLists)?;
     Ok(cand.to_string())
 }
 

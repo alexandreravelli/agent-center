@@ -10,7 +10,10 @@ mod notifier;
 use agent_center::catalog::{Action, App, Catalog};
 use agent_center::runner::{self, Step, with_requirements};
 use agent_center::versions;
+use anyhow::Result;
+use std::fmt;
 use std::io::IsTerminal;
+use std::process::ExitCode;
 use std::thread;
 
 const USAGE: &str = "\
@@ -32,74 +35,97 @@ Options:
   -h, --help       Show this help
   -V, --version    Show the version";
 
-fn main() {
+/// A mistake on the command line, reported with exit code 2.
+#[derive(Debug)]
+struct Usage(String);
+
+impl fmt::Display for Usage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Usage {}
+
+fn main() -> ExitCode {
     // Exit quietly when the reader goes away (`agent-center list | head`) instead of panicking.
     // SAFETY: restoring the default signal action before any other thread exists.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let code = match args.first().map(String::as_str) {
-        None | Some("--updates") => open_window(&args),
+    match dispatch(&args) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("agent-center: {e:#}");
+            if e.is::<Usage>() { ExitCode::from(2) } else { ExitCode::FAILURE }
+        }
+    }
+}
+
+fn dispatch(args: &[String]) -> Result<ExitCode> {
+    let rest = args.get(1..).unwrap_or_default();
+    match args.first().map(String::as_str) {
+        None | Some("--updates") => Ok(open_window(args)),
         Some("-h" | "--help" | "help") => {
             println!("{USAGE}");
-            0
+            Ok(ExitCode::SUCCESS)
         }
         Some("-V" | "--version") => {
             println!("agent-center {}", env!("CARGO_PKG_VERSION"));
-            0
+            Ok(ExitCode::SUCCESS)
         }
-        Some("askpass") => askpass(&args[1..]),
-        Some("notify") => notify(&args[1..]),
-        Some("run-system") => runner::run_system(&args[1..]),
-        Some("list") => list(&args[1..]),
+        Some("askpass") => Ok(askpass(rest)),
+        Some("notify") => notify(rest),
+        Some("run-system") => Ok(exit_code(runner::run_system(rest))),
+        Some("list") => list(rest),
         Some("categories") => {
             let cat = load();
             for c in &cat.categories {
                 println!("{:<12} {}", c.id, c.name);
             }
-            0
+            Ok(ExitCode::SUCCESS)
         }
-        Some("info") => info(&args[1..]),
-        Some("install") => act(Action::Install, &args[1..]),
-        Some("update" | "upgrade") => act(Action::Update, &args[1..]),
-        Some("remove" | "uninstall") => act(Action::Remove, &args[1..]),
-        Some(other) => {
-            eprintln!("agent-center: unknown command {other}\n\n{USAGE}");
-            2
-        }
-    };
-    std::process::exit(code);
+        Some("info") => info(rest),
+        Some("install") => act(Action::Install, rest),
+        Some("update" | "upgrade") => act(Action::Update, rest),
+        Some("remove" | "uninstall") => act(Action::Remove, rest),
+        Some(other) => Err(Usage(format!("unknown command {other}\n\n{USAGE}")).into()),
+    }
+}
+
+/// The exit code of a process status (0 to 255), else a plain failure.
+fn exit_code(code: i32) -> ExitCode {
+    u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from)
 }
 
 #[cfg(feature = "gui")]
-fn open_window(args: &[String]) -> i32 {
-    gui::run(args)
+fn open_window(args: &[String]) -> ExitCode {
+    exit_code(gui::run(args))
 }
 
 #[cfg(not(feature = "gui"))]
-fn open_window(_: &[String]) -> i32 {
+fn open_window(_: &[String]) -> ExitCode {
     println!("{USAGE}");
-    0
+    ExitCode::SUCCESS
 }
 
 #[cfg(feature = "gui")]
-fn notify(args: &[String]) -> i32 {
-    notifier::run(args)
+fn notify(args: &[String]) -> Result<ExitCode> {
+    Ok(exit_code(notifier::run(args)))
 }
 
 #[cfg(not(feature = "gui"))]
-fn notify(_: &[String]) -> i32 {
-    eprintln!("agent-center: notifications need the window (built without the gui feature)");
-    1
+fn notify(_: &[String]) -> Result<ExitCode> {
+    anyhow::bail!("notifications need the window (built without the gui feature)")
 }
 
 #[cfg(feature = "gui")]
-fn askpass(args: &[String]) -> i32 {
-    gui::askpass(args.first().map(String::as_str).unwrap_or("Password:"))
+fn askpass(args: &[String]) -> ExitCode {
+    exit_code(gui::askpass(args.first().map_or("Password:", String::as_str)))
 }
 
 #[cfg(not(feature = "gui"))]
-fn askpass(_: &[String]) -> i32 {
-    1
+fn askpass(_: &[String]) -> ExitCode {
+    ExitCode::FAILURE
 }
 
 fn load() -> Catalog {
@@ -118,11 +144,12 @@ fn par_map<T: Send>(apps: &[&App], f: impl Fn(&App) -> T + Sync) -> Vec<T> {
             .chunks(apps.len().div_ceil(8).max(1))
             .map(|chunk| s.spawn(move || chunk.iter().map(|a| f(a)).collect::<Vec<T>>()))
             .collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        // A panic in a worker is a bug: pass it on.
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
     })
 }
 
-fn list(args: &[String]) -> i32 {
+fn list(args: &[String]) -> Result<ExitCode> {
     let cat = load();
     let installed_only = args.iter().any(|a| a == "--installed");
     let updates = args.iter().any(|a| a == "--updates");
@@ -162,15 +189,18 @@ fn list(args: &[String]) -> i32 {
             println!("  {:<18} {:<22} {:<20} {}", a.id, a.name, state, a.summary);
         }
     }
-    0
+    Ok(ExitCode::SUCCESS)
 }
 
-fn info(args: &[String]) -> i32 {
+/// The catalog app with this id, or a usage error.
+fn find<'a>(cat: &'a Catalog, id: &str) -> Result<&'a App, Usage> {
+    cat.get(id).ok_or_else(|| Usage(format!("unknown app {id}. See `agent-center list`.")))
+}
+
+fn info(args: &[String]) -> Result<ExitCode> {
     let cat = load();
-    let Some(app) = args.first().and_then(|id| cat.get(id)) else {
-        eprintln!("agent-center: unknown app. See `agent-center list`.");
-        return 2;
-    };
+    let id = args.first().ok_or_else(|| Usage("name an app. See `agent-center list`.".into()))?;
+    let app = find(&cat, id)?;
     println!("{} ({})", app.name, app.id);
     println!("{}", app.summary);
     println!("Category:  {}", cat.category_name(&app.category));
@@ -204,22 +234,17 @@ fn info(args: &[String]) -> i32 {
             println!("\n# {title}\n{}", script.trim());
         }
     }
-    0
+    Ok(ExitCode::SUCCESS)
 }
 
-fn act(action: Action, args: &[String]) -> i32 {
+fn act(action: Action, args: &[String]) -> Result<ExitCode> {
     let cat = load();
     let purge = args.iter().any(|a| a == "--purge");
-    let ids: Vec<&String> = args.iter().filter(|a| !a.starts_with('-')).collect();
-    for id in &ids {
-        if cat.get(id).is_none() {
-            eprintln!("agent-center: unknown app {id}. See `agent-center list`.");
-            return 2;
-        }
-    }
+    let named: Vec<&App> =
+        args.iter().filter(|a| !a.starts_with('-')).map(|id| find(&cat, id)).collect::<Result<_, _>>()?;
     let mut steps: Vec<Step> = Vec::new();
     match action {
-        Action::Update if ids.is_empty() => {
+        Action::Update if named.is_empty() => {
             println!("Checking for updates...");
             let apps: Vec<&App> = cat.apps.iter().collect();
             let found = par_map(&apps, |a| {
@@ -233,16 +258,12 @@ fn act(action: Action, args: &[String]) -> i32 {
             }
             if steps.is_empty() {
                 println!("Everything is up to date.");
-                return 0;
+                return Ok(ExitCode::SUCCESS);
             }
         }
-        _ if ids.is_empty() => {
-            eprintln!("agent-center: name at least one app. See `agent-center list`.");
-            return 2;
-        }
+        _ if named.is_empty() => return Err(Usage("name at least one app. See `agent-center list`.".into()).into()),
         _ => {
-            for id in ids {
-                let app = cat.get(id).unwrap();
+            for app in named {
                 let present = versions::installed(app).is_some();
                 match action {
                     Action::Install if present => {
@@ -255,23 +276,16 @@ fn act(action: Action, args: &[String]) -> i32 {
                     }
                     _ => {}
                 }
-                steps.push(Step { id: id.clone(), action, purge });
+                steps.push(Step { id: app.id.clone(), action, purge });
             }
         }
     }
     if steps.is_empty() {
-        return 0;
+        return Ok(ExitCode::SUCCESS);
     }
     let steps = with_requirements(&cat, steps, &|a| versions::installed(a).is_some());
     let tty = std::io::stdin().is_terminal();
-    match runner::run(&cat, &steps, tty, &mut |line| println!("{line}")) {
-        Ok(()) => {
-            println!("Done.");
-            0
-        }
-        Err(e) => {
-            eprintln!("agent-center: {e}");
-            1
-        }
-    }
+    runner::run(&cat, &steps, tty, &mut |line| println!("{line}"))?;
+    println!("Done.");
+    Ok(ExitCode::SUCCESS)
 }
