@@ -2,16 +2,14 @@
 //!
 //! Without arguments it opens the window; with a command it works in the terminal.
 
-mod catalog;
 #[cfg(feature = "gui")]
 mod gui;
 #[cfg(feature = "gui")]
 mod notifier;
-mod runner;
-mod versions;
 
-use catalog::{Action, App, Catalog};
-use runner::Step;
+use agent_center::catalog::{Action, App, Catalog};
+use agent_center::runner::{self, Step, with_requirements};
+use agent_center::versions;
 use std::io::IsTerminal;
 use std::thread;
 
@@ -177,7 +175,7 @@ fn info(args: &[String]) -> i32 {
     println!("{}", app.summary);
     println!("Category:  {}", cat.category_name(&app.category));
     println!("Homepage:  {}", app.homepage);
-    println!("Method:    {} ({})", app.method, scope_name(app));
+    println!("Method:    {} ({})", app.method, app.scope.description());
     println!("Installed: {}", versions::installed(app).unwrap_or_else(|| "no".into()));
     if !app.latest.is_empty() {
         println!("Latest:    {}", versions::latest(app).unwrap_or_else(|e| format!("unknown ({e})")));
@@ -207,42 +205,6 @@ fn info(args: &[String]) -> i32 {
         }
     }
     0
-}
-
-pub fn scope_name(app: &App) -> &'static str {
-    match app.scope {
-        catalog::Scope::System => "system-wide, needs administrator rights",
-        catalog::Scope::User => "in your home directory",
-    }
-}
-
-/// Adds the installation of missing requirements before the steps that need them.
-pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(&App) -> bool) -> Vec<Step> {
-    fn visit(cat: &Catalog, id: &str, is_installed: &dyn Fn(&App) -> bool, res: &mut Vec<Step>, depth: usize) {
-        let Some(app) = cat.get(id) else { return };
-        if depth > 8 {
-            return;
-        }
-        for r in &app.requires {
-            if let Some(dep) = cat.get(r)
-                && !is_installed(dep)
-                && !res.iter().any(|s| s.id == *r)
-            {
-                visit(cat, r, is_installed, res, depth + 1);
-                res.push(Step { id: r.clone(), action: Action::Install, purge: false });
-            }
-        }
-    }
-    let mut res = Vec::new();
-    for step in steps {
-        if step.action == Action::Install {
-            visit(cat, &step.id, is_installed, &mut res, 0);
-        }
-        if !res.contains(&step) {
-            res.push(step);
-        }
-    }
-    res
 }
 
 fn act(action: Action, args: &[String]) -> i32 {

@@ -184,6 +184,35 @@ pub struct Step {
     pub purge: bool,
 }
 
+/// Adds the installation of missing requirements before the steps that need them.
+pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(&App) -> bool) -> Vec<Step> {
+    fn visit(cat: &Catalog, id: &str, is_installed: &dyn Fn(&App) -> bool, res: &mut Vec<Step>, depth: usize) {
+        let Some(app) = cat.get(id) else { return };
+        if depth > 8 {
+            return;
+        }
+        for r in &app.requires {
+            if let Some(dep) = cat.get(r)
+                && !is_installed(dep)
+                && !res.iter().any(|s| s.id == *r)
+            {
+                visit(cat, r, is_installed, res, depth + 1);
+                res.push(Step { id: r.clone(), action: Action::Install, purge: false });
+            }
+        }
+    }
+    let mut res = Vec::new();
+    for step in steps {
+        if step.action == Action::Install {
+            visit(cat, &step.id, is_installed, &mut res, 0);
+        }
+        if !res.contains(&step) {
+            res.push(step);
+        }
+    }
+    res
+}
+
 pub fn is_root() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
