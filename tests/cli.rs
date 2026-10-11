@@ -157,10 +157,14 @@ fn info_shows_the_scripts() {
 fn command_line_mistakes_exit_with_2() {
     let sb = Sandbox::new();
     for (args, message) in [
-        ("frobnicate", "agent-center: unknown command frobnicate"),
+        ("frobnicate", "agent-center: unknown command frobnicate. See `agent-center --help`."),
+        ("isntall hello", "agent-center: unknown command isntall. Did you mean install?"),
         ("info", "agent-center: name an app."),
-        ("info nope", "agent-center: unknown app nope."),
-        ("install hello nope", "agent-center: unknown app nope."),
+        ("info nope", "agent-center: unknown app nope. See `agent-center list`."),
+        ("info hello base", "agent-center: info shows one app at a time."),
+        ("install hello helo", "agent-center: unknown app helo. Did you mean hello?"),
+        ("install hello --purge", "agent-center: unknown option --purge for install."),
+        ("list --instaled", "agent-center: unknown option --instaled for list. Did you mean --installed?"),
         ("remove", "agent-center: name at least one app."),
     ] {
         let run = sb.run(args);
