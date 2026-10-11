@@ -6,6 +6,7 @@
 mod gui;
 #[cfg(feature = "gui")]
 mod notifier;
+mod style;
 
 use agent_center::catalog::{Action, App, Catalog, Scope};
 use agent_center::runner::{self, Step, with_requirements};
@@ -15,6 +16,7 @@ use std::fmt;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::thread;
+use style::Style;
 
 const USAGE: &str = "\
 Usage: agent-center [--updates | COMMAND]
@@ -135,7 +137,7 @@ fn main() -> ExitCode {
     match dispatch(&args) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("agent-center: {e:#}");
+            eprintln!("{} {e:#}", Style::stderr().red("agent-center:"));
             if e.is::<Usage>() { ExitCode::from(2) } else { ExitCode::FAILURE }
         }
     }
@@ -219,7 +221,7 @@ fn askpass(_: &[String]) -> ExitCode {
 fn load() -> Catalog {
     let cat = Catalog::load();
     for w in &cat.warnings {
-        eprintln!("warning: {w}");
+        eprintln!("{} {w}", Style::stderr().yellow("warning:"));
     }
     cat
 }
@@ -285,20 +287,24 @@ fn list(args: &Args) -> Result<ExitCode> {
         println!("{}", serde_json::to_string_pretty(&list)?);
         return Ok(ExitCode::SUCCESS);
     }
+    let style = Style::stdout();
     for c in &cat.categories {
         let rows = rows(&c.id);
         if rows.is_empty() {
             continue;
         }
-        println!("{}", c.name);
+        println!("{}", style.bold(&c.name));
         for i in rows {
             let a = apps[i];
+            // Padded before it is painted: escape codes have no width.
             let state = match (&installed[i], &latest[i]) {
-                (Some(v), Some(l)) if versions::is_newer(v, l) => format!("{v} -> {l}"),
-                (Some(v), _) => v.clone(),
-                (None, _) => "-".into(),
+                (Some(v), Some(l)) if versions::is_newer(v, l) => {
+                    style.yellow(&format!("{:<20}", format!("{v} -> {l}")))
+                }
+                (Some(v), _) => style.green(&format!("{v:<20}")),
+                (None, _) => style.dim(&format!("{:<20}", "-")),
             };
-            println!("  {:<18} {:<22} {:<20} {}", a.id, a.name, state, a.summary);
+            println!("  {:<18} {:<22} {state} {}", a.id, a.name, a.summary);
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -358,7 +364,8 @@ fn info(args: &[String]) -> Result<ExitCode> {
         println!("{}", serde_json::to_string_pretty(&info)?);
         return Ok(ExitCode::SUCCESS);
     }
-    println!("{} ({})", app.name, app.id);
+    let style = Style::stdout();
+    println!("{} ({})", style.bold(&app.name), app.id);
     println!("{}", app.summary);
     println!("Category:  {}", cat.category_name(&app.category));
     println!("Homepage:  {}", app.homepage);
@@ -388,7 +395,7 @@ fn info(args: &[String]) -> Result<ExitCode> {
         ("Remove", app.remove.as_str()),
     ] {
         if !script.trim().is_empty() {
-            println!("\n# {title}\n{}", script.trim());
+            println!("\n{}\n{}", style.step(&format!("# {title}")), script.trim());
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -447,16 +454,20 @@ fn act(action: Action, args: &[String]) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let tty = std::io::stdin().is_terminal();
-    runner::run(&cat, &steps, tty, &mut |line| println!("{line}"))?;
-    println!("Done.");
+    let style = Style::stdout();
+    runner::run(&cat, &steps, tty, &mut |line| {
+        if line.starts_with("==> ") { println!("{}", style.step(line)) } else { println!("{line}") }
+    })?;
+    println!("{}", style.green("Done."));
     Ok(ExitCode::SUCCESS)
 }
 
 /// What `steps` would run, in order, for `--dry-run`.
 fn print_plan(cat: &Catalog, steps: &[Step]) {
-    println!("Dry run: nothing is changed. Agent Center would run, in this order:");
+    let style = Style::stdout();
+    println!("{}", style.bold("Dry run: nothing is changed. Agent Center would run, in this order:"));
     let script = |title: String, who: &str, text: &str| {
-        println!("\n==> {title} ({who})");
+        println!("\n{}", style.step(&format!("==> {title} ({who})")));
         for line in text.trim().lines() {
             println!("    {line}");
         }
@@ -473,7 +484,7 @@ fn print_plan(cat: &Catalog, steps: &[Step]) {
         script(format!("{} {}", step.action.verb_ing(), app.name), who, app.script(step.action));
         if step.action == Action::Remove && step.purge {
             for path in app.purge_paths() {
-                println!("\n==> Deleting {}", path.display());
+                println!("\n{}", style.step(&format!("==> Deleting {}", path.display())));
             }
         }
     }
