@@ -3,6 +3,7 @@
 use agent_center::catalog::{self, Action, App, Catalog};
 use agent_center::runner::{self, Step};
 use agent_center::versions;
+use anyhow::{anyhow, bail};
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::prelude::*;
 use gtk::{cairo, gio, glib, pango};
@@ -11,7 +12,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::thread;
 
 const APP_ID: &str = "io.github.alexandreravelli.AgentCenter";
@@ -69,7 +70,7 @@ enum Msg {
     Installed(usize, Option<String>),
     Latest(usize, Option<String>),
     Line(String),
-    JobDone(Vec<usize>, Result<(), String>),
+    JobDone(Vec<usize>, Result<(), runner::RunError>),
 }
 
 struct Ui {
@@ -214,13 +215,18 @@ fn build(app: &gtk::Application) {
     stack.add_named(&empty, "empty");
 
     // Status bar and log.
-    let log_view =
-        gtk::TextView::builder().editable(false).cursor_visible(false).wrap_mode(gtk::WrapMode::WordChar).build();
+    let log = gtk::TextBuffer::new(None::<&gtk::TextTagTable>);
+    let log_end = gtk::TextMark::new(Some("end"), false);
+    log.add_mark(&log_end, &log.end_iter());
+    let log_view = gtk::TextView::builder()
+        .buffer(&log)
+        .editable(false)
+        .cursor_visible(false)
+        .wrap_mode(gtk::WrapMode::WordChar)
+        .build();
     log_view.style_context().add_class("ac-log");
     log_view.set_left_margin(8);
     log_view.set_top_margin(6);
-    let log = log_view.buffer().unwrap();
-    let log_end = log.create_mark(Some("end"), &log.end_iter(), false).unwrap();
     let log_scroller = gtk::ScrolledWindow::builder().height_request(190).build();
     log_scroller.add(&log_view);
     let revealer = gtk::Revealer::new();
@@ -584,7 +590,8 @@ impl Ui {
             let (queue, cat, tx) = (queue.clone(), self.cat.clone(), self.tx.clone());
             thread::spawn(move || {
                 loop {
-                    let Some(i) = queue.lock().unwrap().pop() else { break };
+                    // A poisoned lock still holds a valid list of indexes.
+                    let Some(i) = queue.lock().unwrap_or_else(PoisonError::into_inner).pop() else { break };
                     let app = &cat.apps[i];
                     let installed = versions::installed(app);
                     let known = installed.is_some();
@@ -864,11 +871,11 @@ impl Ui {
         }
         text.push_str("# Helper functions available to every script\n");
         text.push_str(runner::PRELUDE);
-        let view = gtk::TextView::builder().editable(false).wrap_mode(gtk::WrapMode::None).build();
+        let buffer = gtk::TextBuffer::builder().text(text.as_str()).build();
+        let view = gtk::TextView::builder().buffer(&buffer).editable(false).wrap_mode(gtk::WrapMode::None).build();
         view.style_context().add_class("ac-log");
         view.set_left_margin(8);
         view.set_top_margin(6);
-        view.buffer().unwrap().set_text(&text);
         let label = gtk::Label::builder().label("<b>What Agent Center runs</b>").use_markup(true).xalign(0.0).build();
         let scroller = gtk::ScrolledWindow::builder().vexpand(true).shadow_type(gtk::ShadowType::In).build();
         scroller.add(&view);
@@ -895,19 +902,19 @@ fn desktop_entry(id: &str) -> Option<PathBuf> {
 }
 
 /// Starts the app: its command in a terminal, or its first desktop entry found.
-fn launch(app: &App) -> Result<(), String> {
+fn launch(app: &App) -> anyhow::Result<()> {
     if app.command.is_empty() {
         let id = app
             .desktop
             .iter()
             .find(|id| desktop_entry(id).is_some())
-            .ok_or_else(|| format!("no desktop entry for {}", app.name))?;
+            .ok_or_else(|| anyhow!("no desktop entry for {}", app.name))?;
         let info = gio::AppInfo::all()
             .into_iter()
             .find(|a| a.id().as_deref() == Some(id.as_str()))
-            .ok_or_else(|| format!("{id} cannot be started"))?;
+            .ok_or_else(|| anyhow!("{id} cannot be started"))?;
         let ctx = gtk::gdk::Display::default().and_then(|d| d.app_launch_context());
-        return info.launch(&[], ctx.as_ref()).map_err(|e| e.to_string());
+        return Ok(info.launch(&[], ctx.as_ref())?);
     }
     // A login, interactive shell reads the files installers add to PATH (~/.profile, ~/.bashrc).
     // The shell stays open after the command ends.
@@ -929,7 +936,7 @@ fn launch(app: &App) -> Result<(), String> {
             return Ok(());
         }
     }
-    Err("no terminal found. Install one with: sudo apt install xfce4-terminal".into())
+    bail!("no terminal found. Install one with: sudo apt install xfce4-terminal")
 }
 
 /// Waits for a started program in the background, so it does not stay a zombie when it exits.

@@ -1,7 +1,7 @@
 //! Runs catalog scripts: as the user, or as root through sudo or pkexec.
 
 use crate::catalog::{Action, App, Catalog, Scope};
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
@@ -253,59 +253,104 @@ fn in_path(cmd: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file()))
 }
 
+/// Why a job stopped.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum RunError {
+    /// A step names an app the catalog does not have.
+    #[error("unknown app {0}")]
+    UnknownApp(String),
+    /// A program could not be started, or its output could not be read.
+    #[error("cannot run {program}: {error}")]
+    Spawn {
+        /// The program.
+        program: String,
+        /// What went wrong.
+        error: io::Error,
+    },
+    /// A script exited with an error.
+    #[error("{0}")]
+    Exit(ExitStatus),
+    /// sudo or pkexec did not run the system steps: wrong password, dialog cancelled, or a
+    /// user who may not become root.
+    #[error("authentication failed or was cancelled")]
+    Authentication,
+    /// One of the system steps failed; its messages are in the output.
+    #[error("a step failed (see the messages above)")]
+    SystemStep,
+    /// A step of this app failed.
+    #[error("{app}: {error}")]
+    App {
+        /// The app's name.
+        app: String,
+        /// What went wrong.
+        error: Box<RunError>,
+    },
+}
+
+impl RunError {
+    fn of(app: &App) -> impl FnOnce(RunError) -> RunError + '_ {
+        |error| RunError::App { app: app.name.clone(), error: Box::new(error) }
+    }
+}
+
 /// Runs the steps in order, sending every output line to `out`. Stops at the first failure.
 ///
 /// System-scope scripts run as root: consecutive ones are grouped into a single
 /// `agent-center run-system` call so the password is asked once.
-pub fn run(cat: &Catalog, steps: &[Step], interactive_tty: bool, out: &mut dyn FnMut(&str)) -> Result<(), String> {
+///
+/// # Errors
+///
+/// Returns the [`RunError`] of the first step that fails.
+pub fn run(cat: &Catalog, steps: &[Step], interactive_tty: bool, out: &mut dyn FnMut(&str)) -> Result<(), RunError> {
+    let app_of = |step: &Step| cat.get(&step.id).ok_or_else(|| RunError::UnknownApp(step.id.clone()));
     let mut i = 0;
     while i < steps.len() {
         let step = &steps[i];
-        let app = cat.get(&step.id).ok_or_else(|| format!("unknown app {}", step.id))?;
+        let app = app_of(step)?;
         if step.action == Action::Remove && !app.remove_user.trim().is_empty() {
             out(&format!("==> Preparing the removal of {}", app.name));
             let mut cmd = user_command(&app.remove_user);
             cmd.env("AC_PURGE", if step.purge { "1" } else { "0" });
-            stream(cmd, out).map_err(|e| format!("{}: {e}", app.name))?;
+            stream(cmd, out).map_err(RunError::of(app))?;
         }
         match app.scope {
             Scope::User => {
                 out(&format!("==> {} {}", step.action.verb_ing(), app.name));
                 let mut cmd = user_command(app.script(step.action));
                 cmd.env("AC_PURGE", if step.purge { "1" } else { "0" });
-                stream(cmd, out).map_err(|e| format!("{}: {e}", app.name))?;
+                stream(cmd, out).map_err(RunError::of(app))?;
                 after(app, step, out);
                 i += 1;
             }
             Scope::System => {
                 // Group this step with the following system steps that need nothing first.
-                let mut j = i + 1;
-                while j < steps.len() {
-                    let next = cat.get(&steps[j].id).ok_or_else(|| format!("unknown app {}", steps[j].id))?;
-                    if next.scope != Scope::System
-                        || (steps[j].action == Action::Remove && !next.remove_user.is_empty())
+                let mut group = vec![(step, app)];
+                for next in &steps[i + 1..] {
+                    let next_app = app_of(next)?;
+                    if next_app.scope != Scope::System
+                        || (next.action == Action::Remove && !next_app.remove_user.is_empty())
                     {
                         break;
                     }
-                    j += 1;
+                    group.push((next, next_app));
                 }
-                let group = &steps[i..j];
-                let result = if is_root() {
-                    group.iter().try_for_each(|s| {
-                        let a = cat.get(&s.id).unwrap();
+                if is_root() {
+                    for &(s, a) in &group {
                         out(&format!("==> {} {}", s.action.verb_ing(), a.name));
-                        stream(system_command(a.script(s.action)), out).map_err(|e| format!("{}: {e}", a.name))
-                    })
+                        stream(system_command(a.script(s.action)), out).map_err(RunError::of(a))?;
+                    }
                 } else {
-                    let (cmd, how) = root_command(group, interactive_tty);
+                    let (cmd, how) = root_command(group.iter().map(|&(s, _)| s), interactive_tty);
                     let status = stream_status(cmd, out)?;
-                    if status.success() { Ok(()) } else { Err(elevation_error(how, status)) }
-                };
-                result?;
-                for s in group {
-                    after(cat.get(&s.id).unwrap(), s, out);
+                    if !status.success() {
+                        return Err(elevation_error(how, status));
+                    }
                 }
-                i = j;
+                for &(s, a) in &group {
+                    after(a, s, out);
+                }
+                i += group.len();
             }
         }
     }
@@ -342,20 +387,20 @@ fn exe() -> PathBuf {
 const SCRIPT_FAILED: i32 = 3;
 
 /// What a failed `run-system` call means, from the exit status of sudo or pkexec.
-fn elevation_error(how: Elevation, status: ExitStatus) -> String {
+fn elevation_error(how: Elevation, status: ExitStatus) -> RunError {
     match (how, status.code()) {
-        (_, Some(SCRIPT_FAILED)) => "a step failed (see the messages above)".into(),
+        (_, Some(SCRIPT_FAILED)) => RunError::SystemStep,
         (Elevation::Pkexec, Some(126 | 127)) | (Elevation::SudoTty | Elevation::SudoAskpass, Some(1)) => {
-            "authentication failed or was cancelled".into()
+            RunError::Authentication
         }
-        _ => status.to_string(),
+        _ => RunError::Exit(status),
     }
 }
 
-/// The sudo or pkexec command that runs the `group` of system steps as root.
-fn root_command(group: &[Step], interactive_tty: bool) -> (Command, Elevation) {
+/// The sudo or pkexec command that runs a group of system steps as root.
+fn root_command<'a>(group: impl Iterator<Item = &'a Step>, interactive_tty: bool) -> (Command, Elevation) {
     let mut args: Vec<String> = vec![exe().to_string_lossy().into_owned(), "run-system".into()];
-    args.extend(group.iter().map(|s| format!("{}:{}", s.id, s.action.as_str())));
+    args.extend(group.map(|s| format!("{}:{}", s.id, s.action.as_str())));
     let how = elevation(interactive_tty);
     let mut cmd = match how {
         Elevation::SudoTty => {
@@ -375,17 +420,24 @@ fn root_command(group: &[Step], interactive_tty: bool) -> (Command, Elevation) {
 }
 
 /// Runs a command, sending its output (stdout and stderr) line by line to `out`.
-pub fn stream(cmd: Command, out: &mut dyn FnMut(&str)) -> Result<(), String> {
+///
+/// # Errors
+///
+/// Returns [`RunError::Spawn`] when the command cannot start, and [`RunError::Exit`] when it
+/// exits with an error.
+pub fn stream(cmd: Command, out: &mut dyn FnMut(&str)) -> Result<(), RunError> {
     let status = stream_status(cmd, out)?;
-    if status.success() { Ok(()) } else { Err(status.to_string()) }
+    if status.success() { Ok(()) } else { Err(RunError::Exit(status)) }
 }
 
 /// Like [`stream`], returning the exit status.
-fn stream_status(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<ExitStatus, String> {
-    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
-    let writer2 = writer.try_clone().map_err(|e| e.to_string())?;
+fn stream_status(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<ExitStatus, RunError> {
+    let program = cmd.get_program().to_string_lossy().into_owned();
+    let spawn = |error| RunError::Spawn { program: program.clone(), error };
+    let (reader, writer) = io::pipe().map_err(spawn)?;
+    let writer2 = writer.try_clone().map_err(spawn)?;
     cmd.stdin(Stdio::null()).stdout(writer).stderr(writer2);
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut child = cmd.spawn().map_err(spawn)?;
     // The parent's copies of the write end must be closed so the reader sees EOF.
     drop(cmd);
     let mut reader = BufReader::new(reader);
@@ -403,7 +455,7 @@ fn stream_status(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<ExitStat
             }
         }
     }
-    child.wait().map_err(|e| e.to_string())
+    child.wait().map_err(spawn)
 }
 
 fn strip_ansi(s: &str) -> String {
@@ -494,13 +546,14 @@ mod tests {
     fn failed_authentication_is_told_apart_from_a_failed_script() {
         use std::os::unix::process::ExitStatusExt;
         let exit = |code: i32| ExitStatus::from_raw(code << 8);
+        let error = |how, code| elevation_error(how, exit(code)).to_string();
         let auth = "authentication failed or was cancelled";
-        assert_eq!(elevation_error(Elevation::Pkexec, exit(126)), auth);
-        assert_eq!(elevation_error(Elevation::Pkexec, exit(127)), auth);
-        assert_eq!(elevation_error(Elevation::SudoAskpass, exit(1)), auth);
-        assert_eq!(elevation_error(Elevation::SudoTty, exit(1)), auth);
-        assert_eq!(elevation_error(Elevation::SudoTty, exit(SCRIPT_FAILED)), "a step failed (see the messages above)");
-        assert_eq!(elevation_error(Elevation::Pkexec, exit(1)), "exit status: 1");
+        assert_eq!(error(Elevation::Pkexec, 126), auth);
+        assert_eq!(error(Elevation::Pkexec, 127), auth);
+        assert_eq!(error(Elevation::SudoAskpass, 1), auth);
+        assert_eq!(error(Elevation::SudoTty, 1), auth);
+        assert_eq!(error(Elevation::SudoTty, SCRIPT_FAILED), "a step failed (see the messages above)");
+        assert_eq!(error(Elevation::Pkexec, 1), "exit status: 1");
     }
 
     #[test]

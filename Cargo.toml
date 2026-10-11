@@ -17,11 +17,13 @@ default = ["gui"]
 gui = ["dep:gtk", "dep:async-channel"]
 
 [dependencies]
+anyhow = "1"
 async-channel = { version = "2", optional = true }
 gtk = { version = "0.19", optional = true, features = ["v3_24"] }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
 [profile.release]
