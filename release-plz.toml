@@ -1,0 +1,27 @@
+# release-plz keeps a release pull request open on GitHub (https://release-plz.dev): it bumps
+# the version from the Conventional Commits merged since the last release and writes the
+# CHANGELOG.md section. Merging it publishes the release: the Release workflow builds the
+# package and the APT repository for a Cargo.toml version that has no GitHub release yet.
+
+[workspace]
+# Agent Center is not on crates.io: the last version comes from the v* git tags.
+git_only = true
+# The Release workflow creates the tag and the GitHub release.
+git_tag_enable = false
+git_release_enable = false
+# The library serves the program; its API is not published.
+semver_check = false
+# Before 1.0, a new feature bumps the minor version (0.3.0 -> 0.4.0), as a breaking change does.
+features_always_increment_minor = true
+pr_labels = ["release"]
+
+[changelog]
+# What users notice, in Keep a Changelog groups; CI, tests and chores stay out.
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^(perf|refactor)", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^(build|chore|ci|style|test)", skip = true },
+    { message = ".*", group = "Other" },
+]
