@@ -6,11 +6,41 @@
 //! 1. `/usr/share/agent-center/catalog` (shipped with the package)
 //! 2. `/etc/agent-center/catalog.d` (added by the administrator)
 //! 3. `~/.config/agent-center/catalog.d` (added by the user; `scope = "user"` apps only)
+//!
+//! A catalog file holds `[[category]]` and `[[app]]` tables:
+//!
+//! ```
+//! use agent_center::catalog::{Action, Catalog, Scope};
+//!
+//! let cat = Catalog::parse(r#"
+//!     [[category]]
+//!     id = "tools"
+//!     name = "Tools"
+//!
+//!     [[app]]
+//!     id = "hello"
+//!     name = "Hello"
+//!     category = "tools"
+//!     scope = "user"
+//!     version = "hello --version"
+//!     install = "curl -fsSL https://example.org/install.sh | sh"
+//!     remove = "rm -f ~/.local/bin/hello"
+//! "#)?;
+//!
+//! let app = cat.get("hello").expect("defined above");
+//! assert_eq!(app.scope, Scope::User);
+//! assert_eq!(cat.category_name("tools"), "Tools");
+//! // Without an update script, updating runs the install script again.
+//! assert_eq!(app.script(Action::Update), app.script(Action::Install));
+//! # Ok::<(), agent_center::catalog::ParseError>(())
+//! ```
 
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// The root-owned catalog directories, in reading order. Scripts that run as root only come
+/// from these.
 pub const SYSTEM_DIRS: [&str; 2] = ["/usr/share/agent-center/catalog", "/etc/agent-center/catalog.d"];
 /// The vendors' logos shipped with Agent Center (`AGENT_CENTER_LOGOS` overrides it for development).
 const LOGO_DIR: &str = "/usr/share/agent-center/logos";
@@ -37,14 +67,28 @@ impl Scope {
     }
 }
 
+/// What a job does to an app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    /// Install the app.
     Install,
+    /// Update the app to its latest version.
     Update,
+    /// Remove the app.
     Remove,
 }
 
 impl Action {
+    /// The action named `s` (`"install"`, `"update"` or `"remove"`), as [`Action::as_str`] writes
+    /// it.
+    ///
+    /// ```
+    /// use agent_center::catalog::Action;
+    ///
+    /// assert_eq!(Action::parse("update"), Some(Action::Update));
+    /// assert_eq!(Action::parse(Action::Remove.as_str()), Some(Action::Remove));
+    /// assert_eq!(Action::parse("upgrade"), None);
+    /// ```
     #[must_use]
     pub fn parse(s: &str) -> Option<Action> {
         match s {
@@ -55,6 +99,7 @@ impl Action {
         }
     }
 
+    /// The action's name: `"install"`, `"update"` or `"remove"`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -75,14 +120,20 @@ impl Action {
     }
 }
 
+/// An app of the catalog: what it is, and the scripts that install, update and remove it.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct App {
+    /// Unique id, used on the command line (`claude-code`).
     pub id: String,
+    /// Name shown to people (`Claude Code`).
     pub name: String,
+    /// Id of the app's [`Category`].
     pub category: String,
+    /// One sentence about the app.
     #[serde(default)]
     pub summary: String,
+    /// The vendor's web page.
     #[serde(default)]
     pub homepage: String,
     /// Listed first, under "Featured", in the views that mix categories.
@@ -104,6 +155,7 @@ pub struct App {
     /// One or two characters for that badge (default: the name's first two letters).
     #[serde(default)]
     pub badge: String,
+    /// Where the app is installed, which decides whether its scripts run as root.
     #[serde(default)]
     pub scope: Scope,
     /// How the app was installed, in a few words ("npm package", "Mozilla APT repository").
@@ -119,10 +171,12 @@ pub struct App {
     /// `pypi:<package>`, `apt:<package>` or `cmd:<shell command>`. Empty when unknown.
     #[serde(default)]
     pub latest: String,
+    /// Shell script that installs the app.
     pub install: String,
-    /// Defaults to the install script.
+    /// Shell script that updates the app. Defaults to the install script.
     #[serde(default)]
     pub update: String,
+    /// Shell script that removes the app.
     pub remove: String,
     /// Run as the user before `remove` (for example to stop a user service).
     #[serde(default)]
@@ -155,6 +209,7 @@ impl App {
         path.is_file().then_some(path)
     }
 
+    /// The script that performs `action`. Updating falls back to the install script.
     #[must_use]
     pub fn script(&self, action: Action) -> &str {
         match action {
@@ -182,13 +237,18 @@ impl App {
     }
 }
 
+/// A group of apps in the window's sidebar.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Category {
+    /// Unique id, referred to by [`App::category`].
     pub id: String,
+    /// Name shown to people.
     pub name: String,
+    /// Icon name from the icon theme.
     #[serde(default)]
     pub icon: String,
+    /// One sentence about the category.
     #[serde(default)]
     pub summary: String,
 }
@@ -202,9 +262,17 @@ struct File {
     app: Vec<App>,
 }
 
+/// A catalog file that is not valid TOML, or that does not follow the catalog's format.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct ParseError(toml::de::Error);
+
+/// Every category and app read from the catalog files.
 #[derive(Debug, Default)]
 pub struct Catalog {
+    /// The categories, in reading order.
     pub categories: Vec<Category>,
+    /// The apps, in reading order. An app defined again replaces the first definition in place.
     pub apps: Vec<App>,
     /// Problems found while reading the files, for the log.
     pub warnings: Vec<String>,
@@ -231,6 +299,18 @@ impl Catalog {
         Catalog::load_dirs(&dirs)
     }
 
+    /// The catalog of one file's text, trusted like a root-owned file.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ParseError`] when the text is not a valid catalog file.
+    pub fn parse(text: &str) -> Result<Catalog, ParseError> {
+        let file: File = toml::from_str(text).map_err(ParseError)?;
+        let mut cat = Catalog::default();
+        cat.add(file, true, Path::new("(text)"), &mut HashMap::new());
+        Ok(cat)
+    }
+
     /// `(directory, trusted)`: apps from untrusted directories may only use `scope = "user"`.
     fn load_dirs(dirs: &[(PathBuf, bool)]) -> Catalog {
         let mut cat = Catalog::default();
@@ -247,38 +327,45 @@ impl Catalog {
                         continue;
                     }
                 };
-                for c in file.category {
-                    match cat.categories.iter_mut().find(|x| x.id == c.id) {
-                        Some(x) => *x = c,
-                        None => cat.categories.push(c),
-                    }
-                }
-                for app in file.app {
-                    if !trusted && app.scope == Scope::System {
-                        cat.warnings.push(format!(
-                            "{}: app \"{}\" skipped: apps defined in your home directory must use scope = \"user\"",
-                            path.display(),
-                            app.id
-                        ));
-                        continue;
-                    }
-                    if let Some(&i) = index.get(&app.id) {
-                        cat.apps[i] = app;
-                    } else {
-                        index.insert(app.id.clone(), cat.apps.len());
-                        cat.apps.push(app);
-                    }
-                }
+                cat.add(file, *trusted, &path, &mut index);
             }
         }
         cat
     }
 
+    /// Adds the categories and apps of a file. `index` maps app ids to their position.
+    fn add(&mut self, file: File, trusted: bool, path: &Path, index: &mut HashMap<String, usize>) {
+        for c in file.category {
+            match self.categories.iter_mut().find(|x| x.id == c.id) {
+                Some(x) => *x = c,
+                None => self.categories.push(c),
+            }
+        }
+        for app in file.app {
+            if !trusted && app.scope == Scope::System {
+                self.warnings.push(format!(
+                    "{}: app \"{}\" skipped: apps defined in your home directory must use scope = \"user\"",
+                    path.display(),
+                    app.id
+                ));
+                continue;
+            }
+            if let Some(&i) = index.get(&app.id) {
+                self.apps[i] = app;
+            } else {
+                index.insert(app.id.clone(), self.apps.len());
+                self.apps.push(app);
+            }
+        }
+    }
+
+    /// The app with this id.
     #[must_use]
     pub fn get(&self, id: &str) -> Option<&App> {
         self.apps.iter().find(|a| a.id == id)
     }
 
+    /// The name of the category with this id, or the id itself when there is no such category.
     #[must_use]
     pub fn category_name(&self, id: &str) -> String {
         self.categories.iter().find(|c| c.id == id).map_or_else(|| id.to_string(), |c| c.name.clone())
@@ -297,6 +384,8 @@ fn toml_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// The user's home directory, from `HOME`.
+#[must_use]
 pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
 }

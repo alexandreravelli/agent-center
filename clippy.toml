@@ -1,0 +1,2 @@
+# Names that are not code, for clippy::doc_markdown (".." keeps the default list).
+doc-valid-idents = ["PyPI", ".."]
