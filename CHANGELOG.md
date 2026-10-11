@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/alexandreravelli/agent-center/compare/v0.2.1...v0.3.0) - 2026-10-11
+
+### Added
+
+- *(cli)* add shell completion for bash, zsh and fish
+- *(cli)* color the terminal output
+- *(cli)* add --json to list and info
+- *(cli)* add --dry-run to install, update and remove
+- *(cli)* suggest close names and refuse unknown options
+
+### Changed
+
+- typed errors in the library, anyhow in the binary
+- move the catalog, version and runner logic into a library
+
+### Documentation
+
+- *(readme)* document the new command-line options and how to contribute
+- add CONTRIBUTING.md and SECURITY.md
+- use the Keep a Changelog format
+- document the library API with tested examples
+
+### Fixed
+
+- *(runner)* strip every escape sequence from script output
+- *(runner)* stop at requirement cycles
+- *(runner)* tell a refused authentication from a failed script
+- *(runner)* run root scripts in a fixed environment
+- *(versions)* pass the GitHub token to curl through stdin
+
 ## [0.2.1](https://github.com/alexandreravelli/agent-center/compare/v0.2.0...v0.2.1) - 2026-10-10
 
 ### Changed
