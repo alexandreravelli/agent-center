@@ -38,6 +38,7 @@ One ~1 MB binary · GTK 3 window and CLI · no system service · every recipe is
 | 🪶 **Featherweight** | No system service: the window runs only while it is open, and the notifier wakes up once a day. Perfect for VMs and remote desktops. |
 | 🔐 **Asks for your password only when needed** | System-wide apps go through `sudo` (with a small password window) or `pkexec`; apps that live in your home directory never ask. |
 | 📝 **Extend it with a text file** | The catalog is plain TOML. Drop a file in `/etc/agent-center/catalog.d/` to add your own apps. |
+| ⌨️ **A command line too** | Everything the window does, in the terminal: completion for bash, zsh and fish, `--dry-run` to read the scripts first, `--json` for your own scripts, and suggestions when you mistype an app. |
 
 ## 📦 Install
 
@@ -110,9 +111,19 @@ agent-center list [--installed]       list the apps
 agent-center list --updates           installed apps with a newer version
 agent-center info claude-code         show an app and the exact scripts Agent Center runs
 agent-center install codex pi         install apps (and what they need)
+agent-center install --dry-run codex  show what would run, in order, and run nothing
 agent-center update                   update every app that has an update
 agent-center remove --purge codex     remove an app and delete its settings and data
 agent-center notify --now             check for updates now and show a notification
+agent-center completions bash         print the completion script (the package installs it)
+```
+
+`list --json` and `info <app> --json` print JSON for scripts. Colors turn off when the output is
+not a terminal or when `NO_COLOR` is set. Mistakes exit with code 2 and suggest the closest names:
+
+```text
+$ agent-center install claude
+agent-center: unknown app claude. Did you mean claude-code or claude-desktop? See `agent-center list`.
 ```
 
 Handy for provisioning a fresh VM:
@@ -159,6 +170,12 @@ drop /etc/apt/sources.list.d/charm.list /etc/apt/keyrings/charm.gpg
 '''
 purge = ["~/.config/crush", "~/.local/share/crush"]
 ```
+
+## 🤝 Contributing
+
+Bug reports, new apps and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+setup, the checks and the commit format. To report a vulnerability, follow [SECURITY.md](SECURITY.md).
+The [changelog](CHANGELOG.md) lists the changes of every release.
 
 ## 📄 License
 
