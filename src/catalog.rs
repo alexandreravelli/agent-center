@@ -223,7 +223,10 @@ impl App {
     /// The purge paths with `~` expanded, keeping only paths inside the home directory.
     #[must_use]
     pub fn purge_paths(&self) -> Vec<PathBuf> {
-        let Some(home) = home_dir() else { return Vec::new() };
+        home_dir().map(|home| self.purge_paths_in(&home)).unwrap_or_default()
+    }
+
+    fn purge_paths_in(&self, home: &Path) -> Vec<PathBuf> {
         self.purge
             .iter()
             .filter_map(|p| {
@@ -434,9 +437,73 @@ mod tests {
 
     #[test]
     fn purge_paths_stay_in_home() {
-        let app = App { purge: vec!["~/.claude".into(), "~/../etc".into(), "/etc".into(), "~/".into()], ..sample() };
-        let home = home_dir().unwrap();
-        assert_eq!(app.purge_paths(), vec![home.join(".claude")]);
+        let purge = ["~/.claude", "~/../etc", "/etc", "~/", "~/a//b", "~/.config/x/../../y", "~/.config/app"];
+        let app = App { purge: purge.map(String::from).to_vec(), ..sample() };
+        let home = Path::new("/home/u");
+        assert_eq!(app.purge_paths_in(home), vec![home.join(".claude"), home.join(".config/app")]);
+    }
+
+    #[test]
+    fn later_directories_override_and_home_apps_stay_in_home() {
+        let root = tempfile::tempdir().unwrap();
+        let (system, user) = (root.path().join("system"), root.path().join("user"));
+        std::fs::create_dir_all(&system).unwrap();
+        std::fs::create_dir_all(&user).unwrap();
+        let app = |id: &str, name: &str, scope: &str| {
+            format!(
+                "[[app]]\nid = \"{id}\"\nname = \"{name}\"\ncategory = \"c\"\nscope = \"{scope}\"\n\
+                 version = \"true\"\ninstall = \"true\"\nremove = \"true\"\n"
+            )
+        };
+        let category = "[[category]]\nid = \"c\"\nname = \"Tools\"\n";
+        std::fs::write(system.join("10-a.toml"), format!("{category}{}", app("a", "A", "system"))).unwrap();
+        std::fs::write(system.join("20-b.toml"), app("b", "B", "system")).unwrap();
+        std::fs::write(system.join("notes.txt"), "not a catalog file").unwrap();
+        // The user redefines "a" in their home (allowed: scope user), adds a system app (refused)
+        // and has a broken file.
+        std::fs::write(user.join("a.toml"), app("a", "My A", "user")).unwrap();
+        std::fs::write(user.join("c.toml"), app("c", "C", "system")).unwrap();
+        std::fs::write(user.join("broken.toml"), "[[app]\n").unwrap();
+        std::fs::write(user.join("names.toml"), "[[category]]\nid = \"c\"\nname = \"Utilities\"\n").unwrap();
+
+        let cat = Catalog::load_dirs(&[(system, true), (user, false)]);
+        let names: Vec<&str> = cat.apps.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["My A", "B"], "a is replaced in place, c is skipped");
+        assert_eq!(cat.get("a").map(|a| a.scope), Some(Scope::User));
+        assert_eq!(cat.category_name("c"), "Utilities");
+        assert_eq!(cat.category_name("other"), "other");
+        assert_eq!(cat.warnings.len(), 2, "{:?}", cat.warnings);
+        assert!(cat.warnings.iter().any(|w| w.contains("broken.toml")));
+        assert!(cat.warnings.iter().any(|w| w.contains("\"c\" skipped")));
+    }
+
+    #[test]
+    fn a_bad_catalog_text_is_an_error() {
+        assert!(Catalog::parse("[[app]]\nid = \"x\"\n").is_err(), "required fields are missing");
+        assert!(Catalog::parse("[[app]]\nid = \"x\"\nnmae = \"typo\"\n").is_err());
+        assert!(Catalog::parse("").is_ok_and(|c| c.apps.is_empty()));
+    }
+
+    #[test]
+    fn logos_are_found_by_name_or_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let svg = dir.path().join("mine.svg");
+        std::fs::write(&svg, "<svg/>").unwrap();
+        let with = |logo: &str| App { logo: logo.into(), ..sample() };
+        assert_eq!(with(&svg.to_string_lossy()).logo_path(), Some(svg));
+        assert_eq!(with("/no/such/logo.svg").logo_path(), None);
+    }
+
+    #[test]
+    fn actions_round_trip_and_describe_themselves() {
+        for action in [Action::Install, Action::Update, Action::Remove] {
+            assert_eq!(Action::parse(action.as_str()), Some(action));
+        }
+        assert_eq!(Action::Remove.verb_ing(), "Removing");
+        assert_eq!(Scope::User.description(), "in your home directory");
+        let app = App { update: "echo update".into(), ..sample() };
+        assert_eq!(app.script(Action::Update), "echo update");
+        assert_eq!(app.script(Action::Remove), "true");
     }
 
     pub fn sample() -> App {

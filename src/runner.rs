@@ -427,18 +427,22 @@ pub fn run(cat: &Catalog, steps: &[Step], interactive_tty: bool, out: &mut dyn F
 
 /// After a removal: deletes the app's data in the home directory when asked.
 fn after(app: &App, step: &Step, out: &mut dyn FnMut(&str)) {
-    if step.action != Action::Remove || !step.purge {
-        return;
+    if step.action == Action::Remove && step.purge {
+        delete(&app.purge_paths(), out);
     }
-    for path in app.purge_paths() {
+}
+
+/// Deletes files and directories; a symbolic link is deleted, not what it points to.
+fn delete(paths: &[PathBuf], out: &mut dyn FnMut(&str)) {
+    for path in paths {
         if path.symlink_metadata().is_err() {
             continue;
         }
         out(&format!("==> Deleting {}", path.display()));
         let res = if path.is_dir() && !path.is_symlink() {
-            std::fs::remove_dir_all(&path)
+            std::fs::remove_dir_all(path)
         } else {
-            std::fs::remove_file(&path)
+            std::fs::remove_file(path)
         };
         if let Err(e) = res {
             out(&format!("warning: cannot delete {}: {e}", path.display()));
@@ -619,6 +623,101 @@ mod tests {
         assert_eq!(strip_ansi("\x1b]0;title\x07a\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"), "alink");
         assert_eq!(strip_ansi("\x1b[38;2;10;20;30mrgb\x1b[0K"), "rgb");
         assert_eq!(strip_ansi("cut\x1b"), "cut");
+    }
+
+    fn catalog() -> Catalog {
+        let app = |id: &str, scope: &str, install: &str, extra: &str| {
+            format!(
+                "[[app]]\nid = \"{id}\"\nname = \"{}\"\ncategory = \"c\"\nscope = \"{scope}\"\n\
+                 version = \"true\"\ninstall = \"{install}\"\nremove = \"echo removing $AC_PURGE\"\n{extra}",
+                id.to_uppercase()
+            )
+        };
+        let text = [
+            app("a", "user", "echo installing a", ""),
+            app("b", "user", "echo before; exit 4", ""),
+            app("c", "user", "echo never", "requires = [\"a\"]\n"),
+            app("d", "user", "true", "remove_user = \"echo user part $AC_PURGE\"\n"),
+            app("s", "system", "true", "requires = [\"c\"]\n"),
+        ]
+        .concat();
+        Catalog::parse(&text).unwrap()
+    }
+
+    fn step(id: &str, action: Action) -> Step {
+        Step { id: id.into(), action, purge: false }
+    }
+
+    fn run_lines(cat: &Catalog, steps: &[Step]) -> (Result<(), RunError>, Vec<String>) {
+        let mut lines = Vec::new();
+        let result = run(cat, steps, false, &mut |l| lines.push(l.to_string()));
+        (result, lines)
+    }
+
+    #[test]
+    fn steps_run_in_order_and_stop_at_the_first_failure() {
+        let steps = ["a", "b", "c"].map(|id| step(id, Action::Install));
+        let (result, lines) = run_lines(&catalog(), &steps);
+        assert_eq!(result.unwrap_err().to_string(), "B: exit status: 4");
+        assert_eq!(lines, ["==> Installing A", "installing a", "==> Installing B", "before"]);
+    }
+
+    #[test]
+    fn removal_runs_the_user_part_first() {
+        let (result, lines) = run_lines(&catalog(), &[Step { purge: true, ..step("d", Action::Remove) }]);
+        assert!(result.is_ok());
+        assert_eq!(lines, ["==> Preparing the removal of D", "user part 1", "==> Removing D", "removing 1"]);
+    }
+
+    #[test]
+    fn unknown_apps_are_reported() {
+        let (result, lines) = run_lines(&catalog(), &[step("zz", Action::Install)]);
+        assert!(matches!(result, Err(RunError::UnknownApp(id)) if id == "zz"));
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn requirements_come_first_once() {
+        let cat = catalog();
+        let steps = with_requirements(&cat, vec![step("s", Action::Install), step("c", Action::Install)], &|_| false);
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["a", "c", "s"], "c is queued once, before s");
+        // Removals and updates add nothing.
+        let steps = with_requirements(&cat, vec![step("s", Action::Remove)], &|_| false);
+        assert_eq!(steps, [step("s", Action::Remove)]);
+    }
+
+    #[test]
+    fn output_keeps_the_last_state_of_progress_lines() {
+        let mut lines = Vec::new();
+        let cmd = user_command("printf '10%%\\r50%%\\r100%%\\n\\033[1mbold\\033[0m\\n'; echo oops >&2");
+        stream(cmd, &mut |l| lines.push(l.to_string())).unwrap();
+        assert_eq!(lines, ["100%", "bold", "oops"]);
+    }
+
+    #[test]
+    fn a_missing_program_is_a_spawn_error() {
+        let err = stream(Command::new("/no/such/program"), &mut |_| {}).unwrap_err();
+        assert!(matches!(&err, RunError::Spawn { program, .. } if program == "/no/such/program"), "{err}");
+    }
+
+    #[test]
+    fn purge_deletes_links_not_their_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let (data, file, target, link) =
+            (dir.path().join("data"), dir.path().join("file"), dir.path().join("target"), dir.path().join("link"));
+        std::fs::create_dir_all(data.join("nested")).unwrap();
+        std::fs::write(data.join("nested/x"), "x").unwrap();
+        std::fs::write(&file, "y").unwrap();
+        std::fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let mut lines = Vec::new();
+        delete(&[data.clone(), file.clone(), link.clone(), dir.path().join("missing")], &mut |l| {
+            lines.push(l.to_string());
+        });
+        assert!(!data.exists() && !file.exists() && link.symlink_metadata().is_err());
+        assert!(target.is_dir(), "the link's target is kept");
+        assert_eq!(lines.len(), 3, "{lines:?}");
     }
 
     #[test]

@@ -288,6 +288,31 @@ mod tests {
         assert!(!is_newer("?", "1.0"));
     }
 
+    fn app(version: &str, latest: &str) -> App {
+        let text = format!(
+            "[[app]]\nid = \"x\"\nname = \"X\"\ncategory = \"c\"\nversion = '''{version}'''\nlatest = '''{latest}'''\n\
+             install = \"true\"\nremove = \"true\"\n"
+        );
+        crate::catalog::Catalog::parse(&text).unwrap().apps.remove(0)
+    }
+
+    #[test]
+    fn installed_versions_come_from_the_version_command() {
+        assert_eq!(installed(&app("echo 'tool 1.2.3 (build 7)'", "")).as_deref(), Some("1.2.3"));
+        assert_eq!(installed(&app("echo installed", "")).as_deref(), Some("?"), "installed, version unknown");
+        assert_eq!(installed(&app("true", "")), None, "prints nothing");
+        assert_eq!(installed(&app("echo 1.0; exit 1", "")), None, "fails");
+    }
+
+    #[test]
+    fn latest_versions_from_a_command() {
+        assert_eq!(latest(&app("true", "cmd:echo v2.0.1")).unwrap(), "2.0.1");
+        assert!(matches!(latest(&app("true", "cmd:exit 3")), Err(LatestError::Command(_))));
+        assert!(matches!(latest(&app("true", "cmd:echo none")), Err(LatestError::NoVersion(t)) if t == "none"));
+        assert!(matches!(latest(&app("true", "")), Err(LatestError::NoSource)));
+        assert!(matches!(latest(&app("true", "ftp:x")), Err(LatestError::UnknownSource(k)) if k == "ftp"));
+    }
+
     #[test]
     fn github_token_stays_off_the_command_line() {
         let url = "https://api.github.com/repos/o/r/releases/latest";
