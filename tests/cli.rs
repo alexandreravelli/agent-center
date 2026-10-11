@@ -173,6 +173,48 @@ fn json_output() {
     assert!(info["scripts"]["update"].as_str().is_some_and(|s| s.starts_with("echo 2.0.0")));
 }
 
+/// Runs `script` in `shell` with the sandbox's agent-center first in PATH; None when the shell
+/// is not installed.
+fn in_shell(sb: &Sandbox, shell: &str, script: &str) -> Option<String> {
+    let bin = Path::new(env!("CARGO_BIN_EXE_agent-center")).parent().unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let out = Command::new(shell)
+        .args(["-c", script])
+        .env("PATH", path)
+        .env("AGENT_CENTER_CATALOG", sb.dir.path().join("catalog"))
+        .output()
+        .ok()?;
+    assert!(out.status.success(), "{shell}: {}", String::from_utf8_lossy(&out.stderr));
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[test]
+fn bash_completes_commands_options_and_apps() {
+    let sb = Sandbox::new();
+    assert_eq!(sb.run("list --ids").ok(), "hello\nbase\n");
+    let complete = |line: &str| {
+        let script = format!(
+            "source <(agent-center completions bash); COMP_WORDS=({line}); COMP_CWORD=$((${{#COMP_WORDS[@]}} - 1)); \
+             _agent_center; printf '%s\\n' \"${{COMPREPLY[@]}}\""
+        );
+        in_shell(&sb, "bash", &script)
+    };
+    assert_eq!(complete("agent-center ins").as_deref(), Some("install\n"));
+    assert_eq!(complete("agent-center install he").as_deref(), Some("hello\n"));
+    assert_eq!(complete("agent-center remove --").as_deref(), Some("--purge\n--dry-run\n"));
+    assert_eq!(complete("agent-center completions f").as_deref(), Some("fish\n"));
+}
+
+#[test]
+fn zsh_and_fish_scripts_parse() {
+    let sb = Sandbox::new();
+    // Skipped where the shell is not installed.
+    let zsh = in_shell(&sb, "zsh", "agent-center completions zsh | zsh -n");
+    let fish = in_shell(&sb, "fish", "agent-center completions fish | source; complete -C 'agent-center install he'");
+    assert!(zsh.is_none_or(|out| out.is_empty()));
+    assert!(fish.as_ref().is_none_or(|out| out.starts_with("hello")), "{fish:?}");
+}
+
 #[test]
 fn a_failing_script_stops_the_job() {
     let sb = Sandbox::new();

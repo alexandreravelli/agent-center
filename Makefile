@@ -21,12 +21,18 @@ install:
 	install -Dm644 data/agent-center-notify.desktop $(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop
 	sed -i 's|^Exec=agent-center|Exec=$(PREFIX)/bin/agent-center|' $(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop
 	install -Dm644 docs/logo.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/agent-center.svg
+	install -Dm644 data/completions/agent-center.bash $(DESTDIR)$(PREFIX)/share/bash-completion/completions/agent-center
+	install -Dm644 data/completions/_agent-center $(DESTDIR)$(PREFIX)/share/zsh/vendor-completions/_agent-center
+	install -Dm644 data/completions/agent-center.fish $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/agent-center.fish
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/agent-center $(DESTDIR)/usr/lib/agent-center/askpass \
 		$(DESTDIR)$(PREFIX)/share/applications/agent-center.desktop \
 		$(DESTDIR)/etc/xdg/autostart/agent-center-notify.desktop \
-		$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/agent-center.svg
+		$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/agent-center.svg \
+		$(DESTDIR)$(PREFIX)/share/bash-completion/completions/agent-center \
+		$(DESTDIR)$(PREFIX)/share/zsh/vendor-completions/_agent-center \
+		$(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d/agent-center.fish
 	rm -rf $(DESTDIR)/usr/share/agent-center
 	-rmdir $(DESTDIR)/usr/lib/agent-center
 

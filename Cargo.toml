@@ -71,5 +71,8 @@ assets = [
     ["data/agent-center.sources", "usr/share/agent-center/", "644"],
     ["data/agent-center-archive-keyring.gpg", "usr/share/keyrings/", "644"],
     ["docs/logo.svg", "usr/share/icons/hicolor/scalable/apps/agent-center.svg", "644"],
+    ["data/completions/agent-center.bash", "usr/share/bash-completion/completions/agent-center", "644"],
+    ["data/completions/_agent-center", "usr/share/zsh/vendor-completions/", "644"],
+    ["data/completions/agent-center.fish", "usr/share/fish/vendor_completions.d/", "644"],
     ["README.md", "usr/share/doc/agent-center/", "644"],
 ]
