@@ -3,6 +3,7 @@
 use crate::catalog::App;
 use crate::runner;
 use std::cmp::Ordering;
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 /// The installed version, or `None` when the app is not installed.
@@ -43,19 +44,38 @@ pub fn latest(app: &App) -> Result<String, String> {
     extract(&text).ok_or_else(|| format!("no version in {:?}", text.trim()))
 }
 
-fn fetch(url: &str) -> Result<String, String> {
+/// The GitHub token from the environment, if any. Optional: it raises GitHub's limit of 60
+/// requests per hour.
+fn github_token() -> Option<String> {
+    ["GITHUB_TOKEN", "GH_TOKEN"].iter().find_map(|k| std::env::var(k).ok().filter(|t| !t.is_empty()))
+}
+
+/// The curl command for `url`, and the header lines to write on its standard input. Secrets go
+/// through stdin: every user on the machine can read a command line (`ps`), not a pipe.
+fn curl(url: &str, token: Option<&str>) -> (Command, Option<String>) {
     let mut cmd = Command::new("curl");
     cmd.args(["-fsSL", "--max-time", "20", "-H", "User-Agent: agent-center"]);
+    let mut stdin = None;
     if url.starts_with("https://api.github.com/") {
         cmd.args(["-H", "Accept: application/vnd.github+json"]);
-        // Optional, raises GitHub's limit of 60 requests per hour.
-        if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN"))
-            && !token.is_empty()
-        {
-            cmd.arg("-H").arg(format!("Authorization: Bearer {token}"));
+        if let Some(token) = token {
+            cmd.args(["-H", "@-"]);
+            stdin = Some(format!("Authorization: Bearer {token}\n"));
         }
     }
-    let out = cmd.arg(url).stdin(Stdio::null()).output().map_err(|e| format!("curl: {e}"))?;
+    cmd.arg(url);
+    (cmd, stdin)
+}
+
+fn fetch(url: &str) -> Result<String, String> {
+    let (mut cmd, headers) = curl(url, github_token().as_deref());
+    cmd.stdin(if headers.is_some() { Stdio::piped() } else { Stdio::null() });
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("curl: {e}"))?;
+    if let (Some(headers), Some(mut stdin)) = (headers, child.stdin.take()) {
+        // Dropping `stdin` closes the pipe, so curl stops reading headers.
+        stdin.write_all(headers.as_bytes()).map_err(|e| format!("curl: {e}"))?;
+    }
+    let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         return Err(err.trim().trim_start_matches("curl: ").to_string());
@@ -190,5 +210,16 @@ mod tests {
         assert!(!is_newer("144.0.2~build1", "144.0.2"));
         assert!(is_newer("2.1.0-rc.1", "2.1.0"));
         assert!(!is_newer("?", "1.0"));
+    }
+
+    #[test]
+    fn github_token_stays_off_the_command_line() {
+        let url = "https://api.github.com/repos/o/r/releases/latest";
+        let (cmd, stdin) = curl(url, Some("s3cret"));
+        assert!(cmd.get_args().all(|a| !a.to_string_lossy().contains("s3cret")));
+        assert_eq!(stdin.as_deref(), Some("Authorization: Bearer s3cret\n"));
+        // Other hosts never get the token.
+        let (_, stdin) = curl("https://registry.npmjs.org/x/latest", Some("s3cret"));
+        assert_eq!(stdin, None);
     }
 }
