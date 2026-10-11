@@ -7,7 +7,7 @@ mod gui;
 #[cfg(feature = "gui")]
 mod notifier;
 
-use agent_center::catalog::{Action, App, Catalog};
+use agent_center::catalog::{Action, App, Catalog, Scope};
 use agent_center::runner::{self, Step, with_requirements};
 use agent_center::versions;
 use anyhow::Result;
@@ -27,6 +27,8 @@ Commands:
   install <app>...                  Install apps (and what they need)
   update [<app>...]                 Update apps; without names, every app with an update
   remove [--purge] <app>...         Remove apps; --purge also deletes their settings and data
+                                    (install, update and remove take --dry-run: show the
+                                    scripts they would run, and run nothing)
   categories                        List the categories
   notify [--now]                    Check for updates once a day and show a desktop
                                     notification (started at login; --now checks at once)
@@ -330,7 +332,7 @@ fn info(args: &[String]) -> Result<ExitCode> {
 }
 
 fn act(action: Action, args: &[String]) -> Result<ExitCode> {
-    let accepted: &[&str] = if action == Action::Remove { &["--purge"] } else { &[] };
+    let accepted: &[&str] = if action == Action::Remove { &["--purge", "--dry-run"] } else { &["--dry-run"] };
     let args = Args::parse(action.as_str(), args, accepted)?;
     let cat = load();
     let purge = args.has("--purge");
@@ -377,10 +379,41 @@ fn act(action: Action, args: &[String]) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let steps = with_requirements(&cat, steps, &|a| versions::installed(a).is_some());
+    if args.has("--dry-run") {
+        print_plan(&cat, &steps);
+        return Ok(ExitCode::SUCCESS);
+    }
     let tty = std::io::stdin().is_terminal();
     runner::run(&cat, &steps, tty, &mut |line| println!("{line}"))?;
     println!("Done.");
     Ok(ExitCode::SUCCESS)
+}
+
+/// What `steps` would run, in order, for `--dry-run`.
+fn print_plan(cat: &Catalog, steps: &[Step]) {
+    println!("Dry run: nothing is changed. Agent Center would run, in this order:");
+    let script = |title: String, who: &str, text: &str| {
+        println!("\n==> {title} ({who})");
+        for line in text.trim().lines() {
+            println!("    {line}");
+        }
+    };
+    for step in steps {
+        let Some(app) = cat.get(&step.id) else { continue };
+        if step.action == Action::Remove && !app.remove_user.trim().is_empty() {
+            script(format!("Preparing the removal of {}", app.name), "as you", &app.remove_user);
+        }
+        let who = match app.scope {
+            Scope::System => "as root",
+            Scope::User => "as you",
+        };
+        script(format!("{} {}", step.action.verb_ing(), app.name), who, app.script(step.action));
+        if step.action == Action::Remove && step.purge {
+            for path in app.purge_paths() {
+                println!("\n==> Deleting {}", path.display());
+            }
+        }
+    }
 }
 
 #[cfg(test)]
