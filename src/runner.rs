@@ -3,7 +3,7 @@
 use crate::catalog::{Action, App, Catalog, Scope};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 
 /// Shell helpers available to every catalog script (`sh`, which is dash on Debian).
 pub const PRELUDE: &str = r#"set -eu
@@ -268,10 +268,9 @@ pub fn run(cat: &Catalog, steps: &[Step], interactive_tty: bool, out: &mut dyn F
                         stream(system_command(a.script(s.action)), out).map_err(|e| format!("{}: {e}", a.name))
                     })
                 } else {
-                    stream(root_command(group, interactive_tty), out).map_err(|e| match e.as_str() {
-                        "exit status 126" | "exit status 127" => "authentication failed or was cancelled".to_string(),
-                        _ => e,
-                    })
+                    let (cmd, how) = root_command(group, interactive_tty);
+                    let status = stream_status(cmd, out)?;
+                    if status.success() { Ok(()) } else { Err(elevation_error(how, status)) }
                 };
                 result?;
                 for s in group {
@@ -309,10 +308,27 @@ fn exe() -> PathBuf {
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("/usr/bin/agent-center"))
 }
 
-fn root_command(group: &[Step], interactive_tty: bool) -> Command {
+/// Exit code of `run-system` when a script fails. sudo exits with 1 and pkexec with 126 or 127
+/// when they refuse to run it, so a failed script is told apart from a failed authentication.
+const SCRIPT_FAILED: i32 = 3;
+
+/// What a failed `run-system` call means, from the exit status of sudo or pkexec.
+fn elevation_error(how: Elevation, status: ExitStatus) -> String {
+    match (how, status.code()) {
+        (_, Some(SCRIPT_FAILED)) => "a step failed (see the messages above)".into(),
+        (Elevation::Pkexec, Some(126 | 127)) | (Elevation::SudoTty | Elevation::SudoAskpass, Some(1)) => {
+            "authentication failed or was cancelled".into()
+        }
+        _ => status.to_string(),
+    }
+}
+
+/// The sudo or pkexec command that runs the `group` of system steps as root.
+fn root_command(group: &[Step], interactive_tty: bool) -> (Command, Elevation) {
     let mut args: Vec<String> = vec![exe().to_string_lossy().into_owned(), "run-system".into()];
     args.extend(group.iter().map(|s| format!("{}:{}", s.id, s.action.as_str())));
-    let mut cmd = match elevation(interactive_tty) {
+    let how = elevation(interactive_tty);
+    let mut cmd = match how {
         Elevation::SudoTty => {
             let mut c = Command::new("sudo");
             c.arg("--");
@@ -326,11 +342,17 @@ fn root_command(group: &[Step], interactive_tty: bool) -> Command {
         Elevation::Pkexec => Command::new("pkexec"),
     };
     cmd.args(args);
-    cmd
+    (cmd, how)
 }
 
 /// Runs a command, sending its output (stdout and stderr) line by line to `out`.
-pub fn stream(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<(), String> {
+pub fn stream(cmd: Command, out: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let status = stream_status(cmd, out)?;
+    if status.success() { Ok(()) } else { Err(status.to_string()) }
+}
+
+/// Like [`stream`], returning the exit status.
+fn stream_status(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<ExitStatus, String> {
     let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
     let writer2 = writer.try_clone().map_err(|e| e.to_string())?;
     cmd.stdin(Stdio::null()).stdout(writer).stderr(writer2);
@@ -352,8 +374,7 @@ pub fn stream(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<(), String>
             }
         }
     }
-    let status = child.wait().map_err(|e| e.to_string())?;
-    if status.success() { Ok(()) } else { Err(status.to_string()) }
+    child.wait().map_err(|e| e.to_string())
 }
 
 fn strip_ansi(s: &str) -> String {
@@ -405,11 +426,11 @@ pub fn run_system(args: &[String]) -> i32 {
             Ok(s) if s.success() => {}
             Ok(s) => {
                 eprintln!("error: {} failed ({s})", app.name);
-                return 1;
+                return SCRIPT_FAILED;
             }
             Err(e) => {
-                eprintln!("error: {e}");
-                return 1;
+                eprintln!("error: {}: {e}", app.name);
+                return SCRIPT_FAILED;
             }
         }
     }
@@ -438,6 +459,19 @@ mod tests {
                 assert!(out.status.success(), "{}: {}", app.id, String::from_utf8_lossy(&out.stderr));
             }
         }
+    }
+
+    #[test]
+    fn failed_authentication_is_told_apart_from_a_failed_script() {
+        use std::os::unix::process::ExitStatusExt;
+        let exit = |code: i32| ExitStatus::from_raw(code << 8);
+        let auth = "authentication failed or was cancelled";
+        assert_eq!(elevation_error(Elevation::Pkexec, exit(126)), auth);
+        assert_eq!(elevation_error(Elevation::Pkexec, exit(127)), auth);
+        assert_eq!(elevation_error(Elevation::SudoAskpass, exit(1)), auth);
+        assert_eq!(elevation_error(Elevation::SudoTty, exit(1)), auth);
+        assert_eq!(elevation_error(Elevation::SudoTty, exit(SCRIPT_FAILED)), "a step failed (see the messages above)");
+        assert_eq!(elevation_error(Elevation::Pkexec, exit(1)), "exit status: 1");
     }
 
     #[test]
