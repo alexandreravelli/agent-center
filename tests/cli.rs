@@ -132,6 +132,24 @@ fn install_update_and_remove_an_app() {
 }
 
 #[test]
+fn dry_run_shows_the_scripts_and_runs_nothing() {
+    let sb = Sandbox::new();
+    let out = sb.run("install --dry-run hello").ok();
+    assert!(out.starts_with("Dry run: nothing is changed."), "{out}");
+    let steps: Vec<&str> = out.lines().filter(|l| l.starts_with("==> ")).collect();
+    assert_eq!(steps, ["==> Installing Base (as you)", "==> Installing Hello (as you)"]);
+    assert!(out.contains("\n    echo 1.0.0 > "), "{out}");
+    assert_eq!((sb.state("base"), sb.state("hello")), (None, None));
+
+    sb.run("install hello").ok();
+    std::fs::create_dir_all(sb.home().join(".hello")).unwrap();
+    let out = sb.run("remove hello --purge --dry-run").ok();
+    assert!(out.contains("==> Removing Hello (as you)\n    rm "), "{out}");
+    assert!(out.contains(&format!("==> Deleting {}", sb.home().join(".hello").display())), "{out}");
+    assert!(sb.home().join(".hello").exists() && sb.state("hello").is_some(), "nothing removed");
+}
+
+#[test]
 fn a_failing_script_stops_the_job() {
     let sb = Sandbox::new();
     std::fs::remove_dir_all(sb.dir.path().join("state")).unwrap();
