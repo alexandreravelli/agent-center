@@ -526,23 +526,41 @@ fn stream_status(mut cmd: Command, out: &mut dyn FnMut(&str)) -> Result<ExitStat
     child.wait().map_err(spawn)
 }
 
+/// Removes terminal escape sequences (ECMA-48) and control characters but tabs.
 fn strip_ansi(s: &str) -> String {
     let mut res = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
+        if c != '\x1b' {
+            if c >= ' ' || c == '\t' {
+                res.push(c);
+            }
+            continue;
+        }
+        match chars.next() {
+            // CSI (colors, cursor moves): parameters, then a final byte from @ to ~.
+            Some('[') => {
                 for c in chars.by_ref() {
-                    if c.is_ascii_alphabetic() {
+                    if ('@'..='~').contains(&c) {
                         break;
                     }
                 }
-            } else {
+            }
+            // OSC (window title, links): up to BEL or ESC \.
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                        break;
+                    }
+                }
+            }
+            // Other sequences: intermediate bytes (space to /), then one final byte, as in
+            // ESC ( B, which `tput sgr0` prints.
+            Some(' '..='/') => {
+                while chars.next_if(|c| (' '..='/').contains(c)).is_some() {}
                 chars.next();
             }
-        } else if c >= ' ' || c == '\t' {
-            res.push(c);
+            _ => {}
         }
     }
     res
@@ -597,6 +615,10 @@ mod tests {
     #[test]
     fn strips_escape_codes() {
         assert_eq!(strip_ansi("\x1b[1;32mok\x1b[0m done"), "ok done");
+        assert_eq!(strip_ansi("\x1b(Bplain\x1b[m text\tend\x07"), "plain text\tend", "tput sgr0");
+        assert_eq!(strip_ansi("\x1b]0;title\x07a\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"), "alink");
+        assert_eq!(strip_ansi("\x1b[38;2;10;20;30mrgb\x1b[0K"), "rgb");
+        assert_eq!(strip_ansi("cut\x1b"), "cut");
     }
 
     #[test]
