@@ -1,10 +1,21 @@
 # Changelog
 
-## 0.2.1 - 2026-10-10
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.1](https://github.com/alexandreravelli/agent-center/compare/v0.2.0...v0.2.1) - 2026-10-10
+
+### Changed
 
 - New macOS-style app icon.
 
-## 0.2.0 - 2026-10-10
+## [0.2.0](https://github.com/alexandreravelli/agent-center/compare/v0.1.0...v0.2.0) - 2026-10-10
+
+### Added
 
 - Agent Center has its own APT repository, signed and added by the package, so `apt upgrade` installs new versions. Removing the package removes it.
 - *Open* button on installed apps: desktop apps start, and command-line agents open in a terminal.
@@ -13,9 +24,9 @@
 - New app: Cursor CLI (38 apps).
 - The release files include `agent-center_amd64.deb`, a copy of the package under a name that does not change.
 
-## 0.1.0 - 2026-10-10
+## [0.1.0](https://github.com/alexandreravelli/agent-center/releases/tag/v0.1.0) - 2026-10-10
 
-First release.
+### Added
 
 - App center for Debian 13 with a GTK 3 window and a command-line interface (`agent-center list`, `info`, `install`, `update`, `remove`).
 - Catalog of 37 apps in five categories: AI Agents, AI Apps, Browsers, IDEs & Editors, Developer Tools.
