@@ -1,0 +1,59 @@
+name: APT repository
+
+# Agent Center's APT repository is made of the files of its latest release (see release.yml). It
+# also carries Dockling and Tileling, so `apt upgrade` updates the three on every machine that
+# has Agent Center. Every hour this workflow adds their newest packages when they have a new
+# release, and signs the index again. Run it by hand to publish at once:
+# Actions > APT repository > Run workflow.
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apt-repository
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the APT repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils
+      - name: Import the APT signing key
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: .github/scripts/import-apt-key.sh
+      - name: Update the files of the latest release
+        run: |
+          tag=$(gh release view --json tagName --jq .tagName)
+          gh release download "$tag" --dir current
+          .github/scripts/apt-index.sh "$PWD/apt/download" current/agent-center_[0-9]*_amd64.deb
+          if cmp -s apt/download/Packages current/Packages; then
+            echo "The repository of $tag is up to date."
+            exit 0
+          fi
+          # New packages first and the index last, so the index never lists a missing file;
+          # packages of older versions leave the release at the end.
+          gh release upload "$tag" apt/download/dockling_*.deb apt/download/tileling_*.deb --clobber
+          gh release upload "$tag" apt/download/Packages apt/download/Packages.gz --clobber
+          gh release upload "$tag" apt/download/Release apt/download/Release.gpg apt/download/InRelease --clobber
+          for old in current/dockling_*_amd64.deb current/tileling_*_amd64.deb; do
+            [ -e "$old" ] || continue
+            if [ ! -e "apt/download/$(basename "$old")" ]; then
+              gh release delete-asset "$tag" "$(basename "$old")" --yes
+              rm "$old"
+            fi
+          done
+          cp apt/download/* current/
+          (cd current && rm -f SHA256SUMS && sha256sum -- * > SHA256SUMS)
+          gh release upload "$tag" current/SHA256SUMS --clobber
+          echo "The repository of $tag now has: $(grep '^Package:\|^Version:' apt/download/Packages | paste -d' ' - - | sed 's/Package: //; s/ Version: / /' | paste -sd, -)"
