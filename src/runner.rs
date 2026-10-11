@@ -143,6 +143,38 @@ pub fn user_command(script: &str) -> Command {
     cmd
 }
 
+/// PATH of the scripts that run as root: system directories only.
+const ROOT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+/// What root scripts keep from the environment: the locale, the terminal and the proxies that
+/// sudo or pkexec let through.
+const ROOT_KEEP: [&str; 12] = [
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "TERM",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+];
+
+/// A shell command running `script` as root, in a fixed environment: a sudoers file that keeps
+/// HOME, or `sudo -E`, must not put a directory the user can write to in root's PATH.
+pub fn system_command(script: &str) -> Command {
+    let mut cmd = user_command(script);
+    cmd.env_clear().env("PATH", ROOT_PATH).env("HOME", "/root").env("USER", "root").env("LOGNAME", "root");
+    for key in ROOT_KEEP {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+    cmd
+}
+
 /// One step of a job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Step {
@@ -233,7 +265,7 @@ pub fn run(cat: &Catalog, steps: &[Step], interactive_tty: bool, out: &mut dyn F
                     group.iter().try_for_each(|s| {
                         let a = cat.get(&s.id).unwrap();
                         out(&format!("==> {} {}", s.action.verb_ing(), a.name));
-                        stream(user_command(a.script(s.action)), out).map_err(|e| format!("{}: {e}", a.name))
+                        stream(system_command(a.script(s.action)), out).map_err(|e| format!("{}: {e}", a.name))
                     })
                 } else {
                     stream(root_command(group, interactive_tty), out).map_err(|e| match e.as_str() {
@@ -368,7 +400,7 @@ pub fn run_system(args: &[String]) -> i32 {
             return 2;
         }
         println!("==> {} {}", action.verb_ing(), app.name);
-        let status = user_command(app.script(action)).stdin(Stdio::null()).status();
+        let status = system_command(app.script(action)).stdin(Stdio::null()).status();
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
@@ -406,6 +438,19 @@ mod tests {
                 assert!(out.status.success(), "{}: {}", app.id, String::from_utf8_lossy(&out.stderr));
             }
         }
+    }
+
+    #[test]
+    fn root_scripts_get_a_fixed_path() {
+        let out = system_command("printf '%s|%s' \"$HOME\" \"$PATH\"").output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let (home, path) = text.split_once('|').unwrap();
+        assert_eq!(home, "/root");
+        // The prelude only prepends root's own ~/.local/bin to the fixed PATH.
+        assert_eq!(
+            path,
+            format!("/root/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:{ROOT_PATH}")
+        );
     }
 
     #[test]
