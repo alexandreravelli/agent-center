@@ -10,6 +10,9 @@ repository = "https://github.com/alexandreravelli/agent-center"
 homepage = "https://github.com/alexandreravelli/agent-center"
 keywords = ["app-center", "installer", "debian", "ai", "xfce"]
 categories = ["command-line-utilities", "gui"]
+# Distributed as a Debian package with its APT repository: it needs its catalog, logos and
+# password helper in /usr, which `cargo install` cannot provide.
+publish = false
 
 [features]
 default = ["gui"]
