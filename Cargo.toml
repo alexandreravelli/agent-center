@@ -26,6 +26,11 @@ serde_json = "1"
 thiserror = "2"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# x, y, w, h, r, g, b are the clearest names in drawing code.
+many_single_char_names = "allow"
+
 [profile.release]
 opt-level = "s"
 lto = true

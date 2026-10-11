@@ -137,6 +137,7 @@ npm_version() {
 "#;
 
 /// A shell command running `script` with the prelude.
+#[must_use]
 pub fn user_command(script: &str) -> Command {
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(format!("{PRELUDE}\n{script}"));
@@ -164,6 +165,7 @@ const ROOT_KEEP: [&str; 12] = [
 
 /// A shell command running `script` as root, in a fixed environment: a sudoers file that keeps
 /// HOME, or `sudo -E`, must not put a directory the user can write to in root's PATH.
+#[must_use]
 pub fn system_command(script: &str) -> Command {
     let mut cmd = user_command(script);
     cmd.env_clear().env("PATH", ROOT_PATH).env("HOME", "/root").env("USER", "root").env("LOGNAME", "root");
@@ -213,6 +215,7 @@ pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(
     res
 }
 
+#[must_use]
 pub fn is_root() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -232,6 +235,7 @@ pub enum Elevation {
 
 pub const ASKPASS: &str = "/usr/lib/agent-center/askpass";
 
+#[must_use]
 pub fn elevation(interactive_tty: bool) -> Elevation {
     let sudo = in_path("sudo");
     if sudo && interactive_tty {
@@ -482,6 +486,7 @@ fn strip_ansi(s: &str) -> String {
 
 /// `agent-center run-system id:action...`: the root side of `run`, started through sudo or pkexec.
 /// Scripts only come from the root-owned catalog directories.
+#[must_use]
 pub fn run_system(args: &[String]) -> i32 {
     if !is_root() {
         eprintln!("agent-center run-system must run as root");

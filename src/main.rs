@@ -76,7 +76,7 @@ fn dispatch(args: &[String]) -> Result<ExitCode> {
         Some("askpass") => Ok(askpass(rest)),
         Some("notify") => notify(rest),
         Some("run-system") => Ok(exit_code(runner::run_system(rest))),
-        Some("list") => list(rest),
+        Some("list") => Ok(list(rest)),
         Some("categories") => {
             let cat = load();
             for c in &cat.categories {
@@ -109,6 +109,7 @@ fn open_window(_: &[String]) -> ExitCode {
 }
 
 #[cfg(feature = "gui")]
+#[expect(clippy::unnecessary_wraps, reason = "same signature as without the gui feature, which fails")]
 fn notify(args: &[String]) -> Result<ExitCode> {
     Ok(exit_code(notifier::run(args)))
 }
@@ -149,7 +150,7 @@ fn par_map<T: Send>(apps: &[&App], f: impl Fn(&App) -> T + Sync) -> Vec<T> {
     })
 }
 
-fn list(args: &[String]) -> Result<ExitCode> {
+fn list(args: &[String]) -> ExitCode {
     let cat = load();
     let installed_only = args.iter().any(|a| a == "--installed");
     let updates = args.iter().any(|a| a == "--updates");
@@ -189,7 +190,7 @@ fn list(args: &[String]) -> Result<ExitCode> {
             println!("  {:<18} {:<22} {:<20} {}", a.id, a.name, state, a.summary);
         }
     }
-    Ok(ExitCode::SUCCESS)
+    ExitCode::SUCCESS
 }
 
 /// The catalog app with this id, or a usage error.
