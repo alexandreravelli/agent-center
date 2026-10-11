@@ -12,6 +12,7 @@
 //! ```
 
 use crate::catalog::{Action, App, Catalog, Scope};
+use std::collections::HashSet;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -236,25 +237,34 @@ pub struct Step {
 /// ```
 #[must_use]
 pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(&App) -> bool) -> Vec<Step> {
-    fn visit(cat: &Catalog, id: &str, is_installed: &dyn Fn(&App) -> bool, res: &mut Vec<Step>, depth: usize) {
+    /// Queues the missing requirements of `id`, deepest first. `seen` holds the apps already
+    /// queued or being visited, so a requirement cycle ends.
+    fn visit<'a>(
+        cat: &'a Catalog,
+        id: &str,
+        is_installed: &dyn Fn(&App) -> bool,
+        res: &mut Vec<Step>,
+        seen: &mut HashSet<&'a str>,
+    ) {
         let Some(app) = cat.get(id) else { return };
-        if depth > 8 {
-            return;
-        }
         for r in &app.requires {
             if let Some(dep) = cat.get(r)
                 && !is_installed(dep)
-                && !res.iter().any(|s| s.id == *r)
+                && seen.insert(dep.id.as_str())
             {
-                visit(cat, r, is_installed, res, depth + 1);
+                visit(cat, r, is_installed, res, seen);
                 res.push(Step { id: r.clone(), action: Action::Install, purge: false });
             }
         }
     }
     let mut res = Vec::new();
+    let mut seen = HashSet::new();
     for step in steps {
-        if step.action == Action::Install {
-            visit(cat, &step.id, is_installed, &mut res, 0);
+        if step.action == Action::Install
+            && let Some(app) = cat.get(&step.id)
+        {
+            seen.insert(app.id.as_str());
+            visit(cat, &step.id, is_installed, &mut res, &mut seen);
         }
         if !res.contains(&step) {
             res.push(step);
@@ -616,6 +626,20 @@ mod tests {
         assert_eq!(error(Elevation::SudoTty, 1), auth);
         assert_eq!(error(Elevation::SudoTty, SCRIPT_FAILED), "a step failed (see the messages above)");
         assert_eq!(error(Elevation::Pkexec, 1), "exit status: 1");
+    }
+
+    #[test]
+    fn requirement_cycles_end() {
+        // Two apps that require each other.
+        let cycle = Catalog::parse(
+            "[[app]]\nid = \"x\"\nname = \"X\"\ncategory = \"c\"\nrequires = [\"y\"]\nversion = \"\"\n\
+             install = \"\"\nremove = \"\"\n[[app]]\nid = \"y\"\nname = \"Y\"\ncategory = \"c\"\n\
+             requires = [\"x\"]\nversion = \"\"\ninstall = \"\"\nremove = \"\"\n",
+        )
+        .unwrap();
+        let install = |id: &str| Step { id: id.into(), action: Action::Install, purge: false };
+        let steps = with_requirements(&cycle, vec![install("x")], &|_| false);
+        assert_eq!(steps, [install("y"), install("x")]);
     }
 
     #[test]
