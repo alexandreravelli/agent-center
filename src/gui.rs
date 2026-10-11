@@ -118,12 +118,13 @@ pub fn run(args: &[String]) -> i32 {
         }
         glib::ExitCode::SUCCESS
     });
-    let mut argv = vec!["agent-center".to_string()];
-    argv.extend(args.iter().cloned());
-    app.run_with_args(&argv);
+    let mut command_line = vec!["agent-center".to_string()];
+    command_line.extend(args.iter().cloned());
+    app.run_with_args(&command_line);
     0
 }
 
+#[expect(clippy::too_many_lines, reason = "the widget tree of the window reads best in one place")]
 fn build(app: &gtk::Application) {
     if let Some(window) = app.active_window() {
         window.present();
@@ -303,7 +304,7 @@ fn build(app: &gtk::Application) {
     }
     {
         let ui = ui.clone();
-        list.set_filter_func(Some(Box::new(move |row| ui.visible(row.index() as usize))));
+        list.set_filter_func(Some(Box::new(move |row| position(row).is_some_and(|i| ui.visible(i)))));
     }
     {
         let ui = ui.clone();
@@ -312,8 +313,7 @@ fn build(app: &gtk::Application) {
     {
         let ui = ui.clone();
         sidebar.connect_row_selected(move |_, row| {
-            let Some(row) = row else { return };
-            let mut i = row.index() as usize;
+            let Some(mut i) = row.and_then(position) else { return };
             if i > 2 {
                 i -= 1; // separator
             }
@@ -463,8 +463,9 @@ impl Ui {
             row.set_header(None::<&gtk::Widget>);
             return;
         }
-        let group = self.group(row.index() as usize);
-        let same = before.is_some_and(|b| self.group(b.index() as usize) == group);
+        let Some(pos) = position(row) else { return };
+        let group = self.group(pos);
+        let same = before.and_then(position).is_some_and(|b| self.group(b) == group);
         if same {
             row.set_header(None::<&gtk::Widget>);
         } else if row.header().is_none() || before.is_none() {
@@ -532,21 +533,18 @@ impl Ui {
             r.spinner.hide();
         }
         let ctx = r.primary.style_context();
-        match &e.installed {
-            None => {
-                r.primary.set_label("Install");
-                r.primary.show();
-                ctx.add_class("suggested-action");
-                r.open.hide();
-                r.remove.hide();
-            }
-            Some(_) => {
-                r.primary.set_label("Update");
-                ctx.remove_class("suggested-action");
-                r.primary.set_visible(e.has_update());
-                r.open.set_visible(can_open(app));
-                r.remove.show();
-            }
+        if e.installed.is_none() {
+            r.primary.set_label("Install");
+            r.primary.show();
+            ctx.add_class("suggested-action");
+            r.open.hide();
+            r.remove.hide();
+        } else {
+            r.primary.set_label("Update");
+            ctx.remove_class("suggested-action");
+            r.primary.set_visible(e.has_update());
+            r.open.set_visible(can_open(app));
+            r.remove.show();
         }
         r.primary.set_sensitive(!busy && !e.checking);
         r.open.set_sensitive(!busy);
@@ -837,12 +835,12 @@ impl Ui {
         } else if !app.desktop.is_empty() {
             rows.push(("Desktop entry", app.desktop.join(", ")));
         }
-        for (n, (k, v)) in rows.iter().enumerate() {
+        for (n, (k, v)) in (0..).zip(&rows) {
             let key = gtk::Label::builder().label(*k).xalign(0.0).build();
             key.style_context().add_class("dim-label");
             let val = gtk::Label::builder().label(v).xalign(0.0).selectable(true).wrap(true).build();
-            grid.attach(&key, 0, n as i32, 1, 1);
-            grid.attach(&val, 1, n as i32, 1, 1);
+            grid.attach(&key, 0, n, 1, 1);
+            grid.attach(&val, 1, n, 1, 1);
         }
         let summary = gtk::Label::builder().label(&app.summary).xalign(0.0).wrap(true).build();
         content.pack_start(&summary, false, false, 0);
@@ -866,7 +864,9 @@ impl Ui {
             ("Installed version", app.version.as_str()),
         ] {
             if !script.trim().is_empty() {
-                text.push_str(&format!("# {title}\n{}\n\n", script.trim()));
+                for part in ["# ", title, "\n", script.trim(), "\n\n"] {
+                    text.push_str(part);
+                }
             }
         }
         text.push_str("# Helper functions available to every script\n");
@@ -939,6 +939,11 @@ fn launch(app: &App) -> anyhow::Result<()> {
     bail!("no terminal found. Install one with: sudo apt install xfce4-terminal")
 }
 
+/// The position of a row in its list, None when it is in no list.
+fn position(row: &gtk::ListBoxRow) -> Option<usize> {
+    usize::try_from(row.index()).ok()
+}
+
 /// Waits for a started program in the background, so it does not stay a zombie when it exits.
 pub fn reap(mut child: Child) {
     thread::spawn(move || child.wait());
@@ -972,7 +977,7 @@ fn avatar(app: &App) -> gtk::Widget {
     area.set_size_request(SIZE, SIZE);
     area.set_valign(gtk::Align::Center);
     area.connect_draw(move |_, cr| {
-        let s = SIZE as f64;
+        let s = f64::from(SIZE);
         rounded_rect(cr, 0.0, 0.0, s, s, 10.0);
         cr.set_source_rgb(r, g, b);
         cr.fill().ok();
@@ -1005,7 +1010,7 @@ fn logo_tile(path: PathBuf, (r, g, b): (f64, f64, f64), size: i32) -> Option<gtk
     area.set_size_request(size, size);
     area.set_valign(gtk::Align::Center);
     area.connect_draw(move |area, cr| {
-        let s = size as f64;
+        let s = f64::from(size);
         rounded_rect(cr, 0.5, 0.5, s - 1.0, s - 1.0, 10.0);
         cr.set_source_rgb(r, g, b);
         cr.fill_preserve().ok();
@@ -1049,10 +1054,10 @@ fn parse_color(s: &str) -> Option<(f64, f64, f64)> {
         return None;
     }
     let n = u32::from_str_radix(h, 16).ok()?;
-    Some((((n >> 16) & 255) as f64 / 255.0, ((n >> 8) & 255) as f64 / 255.0, (n & 255) as f64 / 255.0))
+    Some((f64::from((n >> 16) & 255) / 255.0, f64::from((n >> 8) & 255) / 255.0, f64::from(n & 255) / 255.0))
 }
 
-/// `agent-center askpass PROMPT`: the password window sudo opens (SUDO_ASKPASS). Prints the
+/// `agent-center askpass PROMPT`: the password window sudo opens (`SUDO_ASKPASS`). Prints the
 /// password on stdout; exits with 1 when cancelled.
 pub fn askpass(prompt: &str) -> i32 {
     if gtk::init().is_err() {

@@ -28,6 +28,7 @@ pub enum Scope {
 
 impl Scope {
     /// Where the app lives and what that needs, in words.
+    #[must_use]
     pub fn description(self) -> &'static str {
         match self {
             Scope::System => "system-wide, needs administrator rights",
@@ -44,6 +45,7 @@ pub enum Action {
 }
 
 impl Action {
+    #[must_use]
     pub fn parse(s: &str) -> Option<Action> {
         match s {
             "install" => Some(Action::Install),
@@ -53,6 +55,7 @@ impl Action {
         }
     }
 
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Action::Install => "install",
@@ -62,6 +65,7 @@ impl Action {
     }
 
     /// "Installing", "Updating", "Removing".
+    #[must_use]
     pub fn verb_ing(self) -> &'static str {
         match self {
             Action::Install => "Installing",
@@ -151,6 +155,7 @@ impl App {
         path.is_file().then_some(path)
     }
 
+    #[must_use]
     pub fn script(&self, action: Action) -> &str {
         match action {
             Action::Install => &self.install,
@@ -161,6 +166,7 @@ impl App {
     }
 
     /// The purge paths with `~` expanded, keeping only paths inside the home directory.
+    #[must_use]
     pub fn purge_paths(&self) -> Vec<PathBuf> {
         let Some(home) = home_dir() else { return Vec::new() };
         self.purge
@@ -206,6 +212,7 @@ pub struct Catalog {
 
 impl Catalog {
     /// The full catalog seen by the user.
+    #[must_use]
     pub fn load() -> Catalog {
         if let Some(dir) = std::env::var_os("AGENT_CENTER_CATALOG") {
             return Catalog::load_dirs(&[(PathBuf::from(dir), true)]);
@@ -218,6 +225,7 @@ impl Catalog {
     }
 
     /// Only the root-owned directories: what scripts running as root may come from.
+    #[must_use]
     pub fn load_system() -> Catalog {
         let dirs: Vec<(PathBuf, bool)> = SYSTEM_DIRS.iter().map(|d| (PathBuf::from(d), true)).collect();
         Catalog::load_dirs(&dirs)
@@ -254,12 +262,11 @@ impl Catalog {
                         ));
                         continue;
                     }
-                    match index.get(&app.id) {
-                        Some(&i) => cat.apps[i] = app,
-                        None => {
-                            index.insert(app.id.clone(), cat.apps.len());
-                            cat.apps.push(app);
-                        }
+                    if let Some(&i) = index.get(&app.id) {
+                        cat.apps[i] = app;
+                    } else {
+                        index.insert(app.id.clone(), cat.apps.len());
+                        cat.apps.push(app);
                     }
                 }
             }
@@ -267,12 +274,14 @@ impl Catalog {
         cat
     }
 
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&App> {
         self.apps.iter().find(|a| a.id == id)
     }
 
+    #[must_use]
     pub fn category_name(&self, id: &str) -> String {
-        self.categories.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_else(|| id.to_string())
+        self.categories.iter().find(|c| c.id == id).map_or_else(|| id.to_string(), |c| c.name.clone())
     }
 }
 

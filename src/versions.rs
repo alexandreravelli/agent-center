@@ -42,6 +42,7 @@ pub enum LatestError {
 }
 
 /// The installed version, or `None` when the app is not installed.
+#[must_use]
 pub fn installed(app: &App) -> Option<String> {
     let out = runner::user_command(&app.version).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
     if !out.status.success() {
@@ -154,6 +155,7 @@ fn apt_candidate(pkg: &str) -> Result<String, LatestError> {
 
 /// The first version-looking token: digits and dots with at least one dot ("2.1.4", "144.0"),
 /// skipping a Debian epoch ("1:144.0-1" gives "144.0-1"), keeping a pre-release suffix.
+#[must_use]
 pub fn extract(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -191,6 +193,7 @@ pub fn extract(text: &str) -> Option<String> {
 
 /// Compares the numeric parts ("1.10.0" > "1.9.2"); a pre-release ("2.0.0-beta.1") is older
 /// than its release, and a Debian revision ("144.0-1") is ignored.
+#[must_use]
 pub fn compare(a: &str, b: &str) -> Ordering {
     let parse = |v: &str| {
         let (core, rest) = match v.find(['-', '+', '~']) {
@@ -218,6 +221,7 @@ pub fn compare(a: &str, b: &str) -> Ordering {
 }
 
 /// True when `latest` is newer than `installed`.
+#[must_use]
 pub fn is_newer(installed: &str, latest: &str) -> bool {
     installed != "?" && compare(latest, installed) == Ordering::Greater
 }
