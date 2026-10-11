@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(similar("codx", ids), ["codex"]);
         assert_eq!(similar("firfeox", ids), ["firefox"]);
         assert_eq!(similar("isntall", COMMANDS), ["install"]);
-        assert!(similar("zed", ids).is_empty());
+        assert_eq!(similar("zed", ids), Vec::<&str>::new());
         assert_eq!(similar("--instaled", ["--installed", "--updates"]), ["--installed"]);
     }
 

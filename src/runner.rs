@@ -673,7 +673,7 @@ mod tests {
     fn unknown_apps_are_reported() {
         let (result, lines) = run_lines(&catalog(), &[step("zz", Action::Install)]);
         assert!(matches!(result, Err(RunError::UnknownApp(id)) if id == "zz"));
-        assert!(lines.is_empty());
+        assert_eq!(lines, Vec::<String>::new());
     }
 
     #[test]
