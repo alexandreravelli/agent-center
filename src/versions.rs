@@ -1,4 +1,8 @@
 //! Installed and latest versions.
+//!
+//! The installed version comes from the app's `version` command, the latest one from its
+//! `latest` source (npm, PyPI, GitHub releases, APT or a command). Both are reduced to a version
+//! number with [`extract`] and compared with [`is_newer`].
 
 use crate::catalog::App;
 use crate::runner;
@@ -155,6 +159,15 @@ fn apt_candidate(pkg: &str) -> Result<String, LatestError> {
 
 /// The first version-looking token: digits and dots with at least one dot ("2.1.4", "144.0"),
 /// skipping a Debian epoch ("1:144.0-1" gives "144.0-1"), keeping a pre-release suffix.
+///
+/// ```
+/// use agent_center::versions::extract;
+///
+/// assert_eq!(extract("2.1.4 (Claude Code)").as_deref(), Some("2.1.4"));
+/// assert_eq!(extract("rust-v0.46.0").as_deref(), Some("0.46.0"));
+/// assert_eq!(extract("1:144.0.2-1").as_deref(), Some("144.0.2-1"));
+/// assert_eq!(extract("installed"), None);
+/// ```
 #[must_use]
 pub fn extract(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
@@ -193,6 +206,15 @@ pub fn extract(text: &str) -> Option<String> {
 
 /// Compares the numeric parts ("1.10.0" > "1.9.2"); a pre-release ("2.0.0-beta.1") is older
 /// than its release, and a Debian revision ("144.0-1") is ignored.
+///
+/// ```
+/// use agent_center::versions::compare;
+/// use std::cmp::Ordering;
+///
+/// assert_eq!(compare("1.10.0", "1.9.2"), Ordering::Greater);
+/// assert_eq!(compare("2.0.0-beta.1", "2.0.0"), Ordering::Less);
+/// assert_eq!(compare("144.0-1", "144.0"), Ordering::Equal);
+/// ```
 #[must_use]
 pub fn compare(a: &str, b: &str) -> Ordering {
     let parse = |v: &str| {
@@ -220,7 +242,16 @@ pub fn compare(a: &str, b: &str) -> Ordering {
     pb.cmp(&pa)
 }
 
-/// True when `latest` is newer than `installed`.
+/// True when `latest` is newer than `installed`. An unknown installed version (`"?"`) is never
+/// out of date.
+///
+/// ```
+/// use agent_center::versions::is_newer;
+///
+/// assert!(is_newer("1.9.2", "1.10.0"));
+/// assert!(!is_newer("1.10.0", "1.10.0"));
+/// assert!(!is_newer("?", "2.0.0"));
+/// ```
 #[must_use]
 pub fn is_newer(installed: &str, latest: &str) -> bool {
     installed != "?" && compare(latest, installed) == Ordering::Greater

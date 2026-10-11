@@ -1,4 +1,15 @@
 //! Runs catalog scripts: as the user, or as root through sudo or pkexec.
+//!
+//! Every script runs with `sh` after the [`PRELUDE`], which defines helpers such as `download`,
+//! `apt_install` or `npm_global`:
+//!
+//! ```
+//! use agent_center::runner::user_command;
+//!
+//! let out = user_command("have sh && log ready").output()?;
+//! assert_eq!(String::from_utf8_lossy(&out.stdout), "==> ready\n");
+//! # Ok::<(), std::io::Error>(())
+//! ```
 
 use crate::catalog::{Action, App, Catalog, Scope};
 use std::io::{self, BufRead, BufReader};
@@ -180,13 +191,50 @@ pub fn system_command(script: &str) -> Command {
 /// One step of a job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Step {
+    /// Id of the app.
     pub id: String,
+    /// What to do with it.
     pub action: Action,
     /// After a removal, also delete the app's settings and data in the home directory.
     pub purge: bool,
 }
 
 /// Adds the installation of missing requirements before the steps that need them.
+///
+/// ```
+/// use agent_center::catalog::{Action, Catalog};
+/// use agent_center::runner::{Step, with_requirements};
+///
+/// let cat = Catalog::parse(r#"
+///     [[app]]
+///     id = "node"
+///     name = "Node.js"
+///     category = "tools"
+///     version = "node --version"
+///     install = "apt_install nodejs"
+///     remove = "apt_purge nodejs"
+///
+///     [[app]]
+///     id = "codex"
+///     name = "Codex CLI"
+///     category = "agents"
+///     requires = ["node"]
+///     version = "codex --version"
+///     install = "npm_global @openai/codex"
+///     remove = "npm_remove @openai/codex"
+/// "#)?;
+/// let install = |id: &str| Step { id: id.into(), action: Action::Install, purge: false };
+///
+/// // Node.js is missing, so it is installed first.
+/// let steps = with_requirements(&cat, vec![install("codex")], &|_| false);
+/// assert_eq!(steps, vec![install("node"), install("codex")]);
+///
+/// // Node.js is there: nothing is added.
+/// let steps = with_requirements(&cat, vec![install("codex")], &|app| app.id == "node");
+/// assert_eq!(steps, vec![install("codex")]);
+/// # Ok::<(), agent_center::catalog::ParseError>(())
+/// ```
+#[must_use]
 pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(&App) -> bool) -> Vec<Step> {
     fn visit(cat: &Catalog, id: &str, is_installed: &dyn Fn(&App) -> bool, res: &mut Vec<Step>, depth: usize) {
         let Some(app) = cat.get(id) else { return };
@@ -215,6 +263,7 @@ pub fn with_requirements(cat: &Catalog, steps: Vec<Step>, is_installed: &dyn Fn(
     res
 }
 
+/// True when this process runs as root.
 #[must_use]
 pub fn is_root() -> bool {
     std::fs::read_to_string("/proc/self/status")
@@ -230,11 +279,16 @@ pub enum Elevation {
     SudoTty,
     /// sudo with Agent Center's password window.
     SudoAskpass,
+    /// pkexec, which asks through the desktop's polkit agent.
     Pkexec,
 }
 
+/// The password window sudo opens (`SUDO_ASKPASS`), installed by the package.
 pub const ASKPASS: &str = "/usr/lib/agent-center/askpass";
 
+/// How system scripts will reach root: the terminal's sudo when there is one
+/// (`interactive_tty`), else sudo with Agent Center's password window for members of the sudo
+/// group, else pkexec.
 #[must_use]
 pub fn elevation(interactive_tty: bool) -> Elevation {
     let sudo = in_path("sudo");
@@ -484,8 +538,11 @@ fn strip_ansi(s: &str) -> String {
     res
 }
 
-/// `agent-center run-system id:action...`: the root side of `run`, started through sudo or pkexec.
-/// Scripts only come from the root-owned catalog directories.
+/// `agent-center run-system id:action...`: the root side of [`run`], started through sudo or
+/// pkexec. Scripts only come from the root-owned catalog directories ([`Catalog::load_system`]).
+///
+/// Returns the process exit code: 0 when every step succeeded, 1 when not running as root, 2 for
+/// a bad step, 3 when a script failed.
 #[must_use]
 pub fn run_system(args: &[String]) -> i32 {
     if !is_root() {
