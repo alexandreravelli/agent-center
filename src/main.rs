@@ -47,6 +47,83 @@ impl fmt::Display for Usage {
 
 impl std::error::Error for Usage {}
 
+/// The commands, for suggestions.
+const COMMANDS: [&str; 10] =
+    ["list", "info", "install", "update", "remove", "categories", "notify", "help", "upgrade", "uninstall"];
+
+/// The arguments of a command: app names, and the options it accepts.
+struct Args<'a> {
+    names: Vec<&'a str>,
+    options: Vec<&'a str>,
+}
+
+impl<'a> Args<'a> {
+    /// Splits `args` into names and options, refusing options `command` does not have.
+    fn parse(command: &str, args: &'a [String], accepted: &[&str]) -> Result<Args<'a>, Usage> {
+        let (mut names, mut options) = (Vec::new(), Vec::new());
+        for arg in args {
+            if !arg.starts_with('-') {
+                names.push(arg.as_str());
+            } else if accepted.contains(&arg.as_str()) {
+                options.push(arg.as_str());
+            } else {
+                let hint = did_you_mean(&similar(arg, accepted.iter().copied()));
+                return Err(Usage(format!("unknown option {arg} for {command}.{hint}")));
+            }
+        }
+        Ok(Args { names, options })
+    }
+
+    fn has(&self, option: &str) -> bool {
+        self.options.contains(&option)
+    }
+}
+
+/// Up to three `candidates` close to `word`, closest first: a few typos away, or starting with it
+/// (`claude` gives `claude-code`).
+fn similar<'a>(word: &str, candidates: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let word = word.to_lowercase();
+    let typos = (word.chars().count() / 4).max(1);
+    let mut found: Vec<(usize, &str)> = candidates
+        .into_iter()
+        .filter_map(|c| {
+            let d = distance(&word, &c.to_lowercase());
+            let prefix = word.chars().count() >= 3 && c.to_lowercase().starts_with(&word);
+            (d <= typos || prefix).then_some((d, c))
+        })
+        .collect();
+    found.sort_unstable();
+    found.dedup_by_key(|(_, c)| *c);
+    found.into_iter().take(3).map(|(_, c)| c).collect()
+}
+
+/// Edits (insertion, deletion, substitution, swap of two neighbours) from `a` to `b`.
+fn distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut rows = vec![(0..=b.len()).collect::<Vec<usize>>()];
+    for i in 1..=a.len() {
+        let mut row = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            row[j] = (rows[i - 1][j] + 1).min(row[j - 1] + 1).min(rows[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                row[j] = row[j].min(rows[i - 2][j - 2] + 1);
+            }
+        }
+        rows.push(row);
+    }
+    rows[a.len()][b.len()]
+}
+
+/// " Did you mean x, y or z?", or nothing.
+fn did_you_mean(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => format!(" Did you mean {one}?"),
+        [first @ .., last] => format!(" Did you mean {} or {last}?", first.join(", ")),
+    }
+}
+
 fn main() -> ExitCode {
     // Exit quietly when the reader goes away (`agent-center list | head`) instead of panicking.
     // SAFETY: restoring the default signal action before any other thread exists.
@@ -74,10 +151,14 @@ fn dispatch(args: &[String]) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Some("askpass") => Ok(askpass(rest)),
-        Some("notify") => notify(rest),
+        Some("notify") => {
+            Args::parse("notify", rest, &["--now"])?;
+            notify(rest)
+        }
         Some("run-system") => Ok(exit_code(runner::run_system(rest))),
-        Some("list") => Ok(list(rest)),
+        Some("list") => Ok(list(&Args::parse("list", rest, &["--installed", "--updates"])?)),
         Some("categories") => {
+            Args::parse("categories", rest, &[])?;
             let cat = load();
             for c in &cat.categories {
                 println!("{:<12} {}", c.id, c.name);
@@ -88,7 +169,10 @@ fn dispatch(args: &[String]) -> Result<ExitCode> {
         Some("install") => act(Action::Install, rest),
         Some("update" | "upgrade") => act(Action::Update, rest),
         Some("remove" | "uninstall") => act(Action::Remove, rest),
-        Some(other) => Err(Usage(format!("unknown command {other}\n\n{USAGE}")).into()),
+        Some(other) => {
+            let hint = did_you_mean(&similar(other, COMMANDS));
+            Err(Usage(format!("unknown command {other}.{hint} See `agent-center --help`.")).into())
+        }
     }
 }
 
@@ -150,10 +234,10 @@ fn par_map<T: Send>(apps: &[&App], f: impl Fn(&App) -> T + Sync) -> Vec<T> {
     })
 }
 
-fn list(args: &[String]) -> ExitCode {
+fn list(args: &Args) -> ExitCode {
     let cat = load();
-    let installed_only = args.iter().any(|a| a == "--installed");
-    let updates = args.iter().any(|a| a == "--updates");
+    let installed_only = args.has("--installed");
+    let updates = args.has("--updates");
     let apps: Vec<&App> = cat.apps.iter().collect();
     let installed = par_map(&apps, versions::installed);
     let latest: Vec<Option<String>> = if updates {
@@ -193,15 +277,22 @@ fn list(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// The catalog app with this id, or a usage error.
+/// The catalog app with this id, or a usage error that suggests close ids.
 fn find<'a>(cat: &'a Catalog, id: &str) -> Result<&'a App, Usage> {
-    cat.get(id).ok_or_else(|| Usage(format!("unknown app {id}. See `agent-center list`.")))
+    cat.get(id).ok_or_else(|| {
+        let hint = did_you_mean(&similar(id, cat.apps.iter().map(|a| a.id.as_str())));
+        Usage(format!("unknown app {id}.{hint} See `agent-center list`."))
+    })
 }
 
 fn info(args: &[String]) -> Result<ExitCode> {
+    let args = Args::parse("info", args, &[])?;
     let cat = load();
-    let id = args.first().ok_or_else(|| Usage("name an app. See `agent-center list`.".into()))?;
-    let app = find(&cat, id)?;
+    let app = match args.names[..] {
+        [id] => find(&cat, id)?,
+        [] => return Err(Usage("name an app. See `agent-center list`.".into()).into()),
+        _ => return Err(Usage("info shows one app at a time.".into()).into()),
+    };
     println!("{} ({})", app.name, app.id);
     println!("{}", app.summary);
     println!("Category:  {}", cat.category_name(&app.category));
@@ -239,10 +330,11 @@ fn info(args: &[String]) -> Result<ExitCode> {
 }
 
 fn act(action: Action, args: &[String]) -> Result<ExitCode> {
+    let accepted: &[&str] = if action == Action::Remove { &["--purge"] } else { &[] };
+    let args = Args::parse(action.as_str(), args, accepted)?;
     let cat = load();
-    let purge = args.iter().any(|a| a == "--purge");
-    let named: Vec<&App> =
-        args.iter().filter(|a| !a.starts_with('-')).map(|id| find(&cat, id)).collect::<Result<_, _>>()?;
+    let purge = args.has("--purge");
+    let named: Vec<&App> = args.names.iter().map(|id| find(&cat, id)).collect::<Result<_, _>>()?;
     let mut steps: Vec<Step> = Vec::new();
     match action {
         Action::Update if named.is_empty() => {
@@ -289,4 +381,44 @@ fn act(action: Action, args: &[String]) -> Result<ExitCode> {
     runner::run(&cat, &steps, tty, &mut |line| println!("{line}"))?;
     println!("Done.");
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typos_and_prefixes_are_suggested() {
+        let ids = ["claude-code", "claude-desktop", "codex", "cursor", "firefox"];
+        assert_eq!(similar("claude", ids), ["claude-code", "claude-desktop"]);
+        assert_eq!(similar("codx", ids), ["codex"]);
+        assert_eq!(similar("firfeox", ids), ["firefox"]);
+        assert_eq!(similar("isntall", COMMANDS), ["install"]);
+        assert!(similar("zed", ids).is_empty());
+        assert_eq!(similar("--instaled", ["--installed", "--updates"]), ["--installed"]);
+    }
+
+    #[test]
+    fn distance_counts_edits() {
+        assert_eq!(distance("", "abc"), 3);
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("ab", "ba"), 1);
+        assert_eq!(distance("same", "same"), 0);
+    }
+
+    #[test]
+    fn suggestions_read_naturally() {
+        assert_eq!(did_you_mean(&[]), "");
+        assert_eq!(did_you_mean(&["a"]), " Did you mean a?");
+        assert_eq!(did_you_mean(&["a", "b", "c"]), " Did you mean a, b or c?");
+    }
+
+    #[test]
+    fn unknown_options_are_refused() {
+        let args: Vec<String> = ["codex", "--purge"].map(String::from).to_vec();
+        let parsed = Args::parse("remove", &args, &["--purge"]).unwrap();
+        assert_eq!((parsed.has("--purge"), parsed.names), (true, vec!["codex"]));
+        let err = Args::parse("install", &args, &[]).err().unwrap();
+        assert_eq!(err.to_string(), "unknown option --purge for install.");
+    }
 }
