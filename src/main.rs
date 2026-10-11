@@ -2,6 +2,7 @@
 //!
 //! Without arguments it opens the window; with a command it works in the terminal.
 
+mod completions;
 #[cfg(feature = "gui")]
 mod gui;
 #[cfg(feature = "gui")]
@@ -24,7 +25,8 @@ Usage: agent-center [--updates | COMMAND]
 Without a command, opens the Agent Center window (on the Updates page with --updates).
 
 Commands:
-  list [--installed] [--updates]    List the apps (with the latest versions for --updates)
+  list [--installed] [--updates]    List the apps (with the latest versions for --updates);
+                                    --ids prints the app ids only
   info <app>                        Show an app and the scripts Agent Center runs for it
                                     (list and info take --json: print JSON for scripts)
   install <app>...                  Install apps (and what they need)
@@ -33,6 +35,7 @@ Commands:
                                     (install, update and remove take --dry-run: show the
                                     scripts they would run, and run nothing)
   categories                        List the categories
+  completions <bash|zsh|fish>       Print the shell completion script (the package installs it)
   notify [--now]                    Check for updates once a day and show a desktop
                                     notification (started at login; --now checks at once)
 
@@ -53,8 +56,19 @@ impl fmt::Display for Usage {
 impl std::error::Error for Usage {}
 
 /// The commands, for suggestions.
-const COMMANDS: [&str; 10] =
-    ["list", "info", "install", "update", "remove", "categories", "notify", "help", "upgrade", "uninstall"];
+const COMMANDS: [&str; 11] = [
+    "list",
+    "info",
+    "install",
+    "update",
+    "remove",
+    "categories",
+    "notify",
+    "completions",
+    "help",
+    "upgrade",
+    "uninstall",
+];
 
 /// The arguments of a command: app names, and the options it accepts.
 struct Args<'a> {
@@ -161,7 +175,17 @@ fn dispatch(args: &[String]) -> Result<ExitCode> {
             notify(rest)
         }
         Some("run-system") => Ok(exit_code(runner::run_system(rest))),
-        Some("list") => list(&Args::parse("list", rest, &["--installed", "--updates", "--json"])?),
+        Some("list") => list(&Args::parse("list", rest, &["--installed", "--updates", "--json", "--ids"])?),
+        Some("completions") => {
+            let args = Args::parse("completions", rest, &[])?;
+            let shell = args.names.first().copied().unwrap_or_default();
+            let script = completions::script(shell).ok_or_else(|| {
+                let hint = did_you_mean(&similar(shell, completions::SHELLS));
+                Usage(format!("name a shell: bash, zsh or fish.{hint}"))
+            })?;
+            print!("{script}");
+            Ok(ExitCode::SUCCESS)
+        }
         Some("categories") => {
             Args::parse("categories", rest, &[])?;
             let cat = load();
@@ -241,6 +265,13 @@ fn par_map<T: Send>(apps: &[&App], f: impl Fn(&App) -> T + Sync) -> Vec<T> {
 
 fn list(args: &Args) -> Result<ExitCode> {
     let cat = load();
+    // For shell completion: fast, no version check.
+    if args.has("--ids") {
+        for app in &cat.apps {
+            println!("{}", app.id);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     let installed_only = args.has("--installed");
     let updates = args.has("--updates");
     let apps: Vec<&App> = cat.apps.iter().collect();

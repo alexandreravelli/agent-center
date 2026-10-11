@@ -44,7 +44,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev
+      # zsh and fish: the tests check their completion scripts too.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev zsh fish
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --locked --all-features
       - run: cargo test --locked --no-default-features
